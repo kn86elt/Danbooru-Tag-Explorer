@@ -67,7 +67,7 @@ chmod +x run.sh
 danbooru_tag_explorer/
 ├── index.html          # アプリ本体 (HTML)
 ├── app.js              # アプリ本体 (JavaScript)
-├── style.css           # スタイルシート
+├── dte_app.css         # スタイルシート
 ├── server.py           # Flask サーバー (静的配信 + API)
 ├── run.bat             # Windows 用起動スクリプト
 ├── run.sh              # macOS / Linux 用起動スクリプト（未検証）

@@ -198,111 +198,54 @@ def on_app_started(demo, app):
 
 # ---- Gradio tab HTML --------------------------------------------------------
 def _build_ui_html():
-    # Scroll problem root cause
+    # Height strategy
     # -----------------------------------------------------------------------
-    # When an iframe loads a document, the browser gives it implicit scroll
-    # focus. Even when the iframe is hidden (display:none or visibility:hidden
-    # on a parent), Chrome retains scroll focus in the iframe's contentWindow,
-    # causing wheel events to be swallowed by the hidden iframe rather than
-    # reaching Gradio's scroll containers in other tabs.
+    # Gradio tab panels use height:auto, so any child measurement-based approach
+    # creates a circular dependency (panel height = iframe height = 0).
+    # getBoundingClientRect() on #dte-wrap consistently returns all-zeros.
     #
-    # Additionally, if the Gradio tab panel does NOT use display:none to hide
-    # inactive tabs (e.g. uses height:0 / overflow:hidden / CSS transforms),
-    # a tall #dte-wrap (height:calc(100vh - X)) in the hidden panel still
-    # participates in layout, inflating the page scroll area and breaking
-    # Gradio's scroll behaviour in other tabs.
+    # Fix: use calc(100vh - OFFSET) in CSS. Viewport units are independent of
+    # the parent chain, so this always fills the visible tab area correctly.
+    # OFFSET covers browser chrome (~60px) + A1111 top bar + tab row (~160px).
     #
-    # Fix strategy:
-    #   1. Start #dte-wrap with height:0 / min-height:0 so it never inflates
-    #      the page, regardless of how Gradio hides the panel.
-    #   2. tabindex="-1" prevents the iframe from receiving keyboard focus.
-    #   3. blur() + window.focus() immediately after the iframe document loads
-    #      releases scroll focus before the user sees anything.
-    #   4. pointer-events:none (CSS default) prevents mouse/wheel events from
-    #      being dispatched to the iframe element in the parent document.
-    #   5. onActivate() restores height and pointer-events when the Tag
-    #      Explorer tab is clicked; onDeactivate() resets them.
-    #
-    # White-screen fix
+    # Scroll focus strategy
     # -----------------------------------------------------------------------
-    # Lazy loading (data-src) requires detecting the tab click before setting
-    # src. If Gradio's tab buttons are not found in time, src is never set.
-    # Fix: use eager loading (src set immediately) -- the document loads but
-    # cannot steal focus thanks to (2)+(3)+(4). Height starts at 0 so the
-    # invisible iframe has no rendered scroll area to capture.
+    # Once an iframe receives a wheel event, its contentWindow holds scroll focus
+    # until explicitly released. Tab-switch detection via MutationObserver proved
+    # unreliable (Gradio's panel attributes may not change in an observable way).
+    #
+    # Fix: listen for mouseleave on #dte-wrap. The moment the cursor moves to
+    # another tab or elsewhere on the page, blur the iframe's contentWindow and
+    # focus the parent window. Simple and reliable.
 
     prefix = ROUTE_PREFIX
-    IFRAME_OFFSET = 220  # px; tune if iframe is too tall/short after activation
+    IFRAME_OFFSET = 220  # px; tune if the iframe is too tall or too short
 
-    js = (
+    return (
+        "<style>\n"
+        "  #dte-wrap  { width:100%; height:calc(100vh - " + str(IFRAME_OFFSET) + "px);"
+        " min-height:400px; overflow:hidden; }\n"
+        "  #dte-frame { width:100%; height:100%; border:none; display:block; }\n"
+        "</style>\n"
+        '<div id="dte-wrap">\n'
+        '  <iframe id="dte-frame"\n'
+        '          src="' + prefix + '/"\n'
+        '          allow="clipboard-write">\n'
+        "  </iframe>\n"
+        "</div>\n"
+        "<script>\n"
         "(function () {\n"
         "  var wrap  = document.getElementById('dte-wrap');\n"
         "  var frame = document.getElementById('dte-frame');\n"
         "  if (!wrap || !frame) return;\n"
         "\n"
-        "  // Release scroll focus immediately after the iframe's doc loads\n"
-        "  frame.addEventListener('load', function () {\n"
-        "    try { frame.contentWindow.blur(); } catch (e) {}\n"
-        "    window.focus();\n"
-        "  });\n"
-        "\n"
-        "  function onActivate() {\n"
-        "    wrap.style.height    = 'calc(100vh - " + str(IFRAME_OFFSET) + "px)';\n"
-        "    wrap.style.minHeight = '400px';\n"
-        "    frame.style.pointerEvents = 'auto';\n"
-        "  }\n"
-        "\n"
-        "  function onDeactivate() {\n"
-        "    wrap.style.height    = '0';\n"
-        "    wrap.style.minHeight = '0';\n"
-        "    frame.style.pointerEvents = 'none';\n"
-        "    try { frame.contentWindow.blur(); } catch (e) {}\n"
-        "    window.focus();\n"
-        "  }\n"
-        "\n"
-        "  // Backup: release on mouseleave\n"
+        "  // Release scroll focus the moment the cursor leaves the iframe area\n"
         "  wrap.addEventListener('mouseleave', function () {\n"
         "    try { frame.contentWindow.blur(); } catch (e) {}\n"
-        "    window.focus();\n"
+        "    try { window.focus(); } catch (e) {}\n"
         "  });\n"
-        "\n"
-        "  // Primary: intercept Gradio tab button clicks\n"
-        "  function attachTabListeners() {\n"
-        "    var tabs = document.querySelectorAll('.tab-nav button, [role=\"tab\"]');\n"
-        "    if (!tabs.length) { setTimeout(attachTabListeners, 200); return; }\n"
-        "    var ourBtn = null;\n"
-        "    tabs.forEach(function (btn) {\n"
-        "      var t = (btn.textContent || btn.innerText || '').replace(/\\s+/g, ' ').trim();\n"
-        "      if (t.indexOf('Tag Explorer') >= 0) ourBtn = btn;\n"
-        "    });\n"
-        "    if (!ourBtn) { setTimeout(attachTabListeners, 200); return; }\n"
-        "    ourBtn.addEventListener('click', onActivate);\n"
-        "    tabs.forEach(function (btn) {\n"
-        "      if (btn !== ourBtn) btn.addEventListener('click', onDeactivate);\n"
-        "    });\n"
-        "    // If Tag Explorer is already the active tab on load\n"
-        "    var sel = ourBtn.getAttribute('aria-selected');\n"
-        "    var cls = (ourBtn.className || '').toString();\n"
-        "    if (sel === 'true' || cls.indexOf('selected') >= 0) onActivate();\n"
-        "    console.log('[DTE] tab listeners attached');\n"
-        "  }\n"
-        "  attachTabListeners();\n"
         "})();\n"
-    )
-
-    return (
-        "<style>\n"
-        "  #dte-wrap  { width:100%; height:0; min-height:0; overflow:hidden; }\n"
-        "  #dte-frame { width:100%; height:100%; border:none; display:block; pointer-events:none; }\n"
-        "</style>\n"
-        '<div id="dte-wrap">\n'
-        '  <iframe id="dte-frame"\n'
-        '          src="' + prefix + '/"\n'
-        '          allow="clipboard-write"\n'
-        '          tabindex="-1">\n'
-        "  </iframe>\n"
-        "</div>\n"
-        "<script>\n" + js + "</script>\n"
+        "</script>\n"
     )
 
 
@@ -312,7 +255,7 @@ def on_ui_tabs():
         import gradio as gr
         with gr.Blocks() as ui:
             gr.HTML(_build_ui_html())
-        return [(ui, "Tag Explorer", "danbooru_tag_explorer_tab")]
+        return [(ui, "DanbooruTagExplorer", "danbooru_tag_explorer_tab")]
     except Exception:
         print("[Danbooru Tag Explorer] on_ui_tabs error:")
         traceback.print_exc()
