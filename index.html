@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Danbooru Tag Explorer</title>
+  <meta name="description" content="Danbooruタグを階層カテゴリからツリー状に探索できるWebUI" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Header -->
+  <header id="app-header">
+    <div class="header-left">
+      <!-- Mobile hamburger button -->
+      <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="メニューを開く" title="カテゴリを開く">
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+      </button>
+      <div class="logo">
+        <span class="logo-icon">◈</span>
+        <span class="logo-text">Danbooru Tag Explorer</span>
+      </div>
+    </div>
+    <div class="header-center">
+      <div class="search-wrap">
+        <span class="search-icon">⌕</span>
+        <input
+          type="text"
+          id="global-search"
+          placeholder="タグを検索… (例: long hair, school uniform)"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button id="search-clear" class="search-clear" title="クリア" aria-label="検索クリア">✕</button>
+      </div>
+    </div>
+    <div class="header-right">
+      <span id="tag-count-badge" class="tag-count-badge" title="ロード済みタグ数">—</span>
+      <label class="toggle-label header-theme-toggle" style="margin-right: 8px;">
+        <input type="checkbox" id="theme-toggle" />
+        <span>ライトモード</span>
+      </label>
+      <div class="filter-wrap" title="この投稿数未満のタグを非表示">
+        <label class="filter-label" for="min-post-filter">最小post数</label>
+        <input
+          type="number"
+          id="min-post-filter"
+          class="filter-input"
+          value="0"
+          min="0"
+          step="100"
+          placeholder="0"
+        />
+      </div>
+    </div>
+  </header>
+
+  <!-- Sidebar overlay (mobile backdrop) -->
+  <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+  <!-- Search Results Overlay -->
+  <div id="search-results-overlay" class="search-results-overlay hidden">
+    <div class="search-results-header">
+      <span><span id="search-results-count">0件</span>の結果</span>
+      <span class="search-enter-hint">↵ Enter で一覧表示</span>
+    </div>
+    <ul id="search-results-list" class="search-results-list"></ul>
+  </div>
+
+  <!-- Main Layout -->
+  <div id="app-main">
+      <!-- Sidebar Tree -->
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-title">カテゴリ</span>
+        <button id="expand-all" class="btn-tiny" title="全て展開">⊞</button>
+        <button id="collapse-all" class="btn-tiny" title="全て折りたたむ">⊟</button>
+        <!-- Mobile close button -->
+        <button id="sidebar-close-btn" class="btn-tiny sidebar-close-btn" title="閉じる" aria-label="サイドバーを閉じる">✕</button>
+      </div>
+      <div id="sidebar-scroll" class="sidebar-scroll">
+        <!-- Favorites / Pinned -->
+        <nav id="fav-nav" aria-label="お気に入り" class="tree-nav-section"></nav>
+        <div class="tree-divider" id="fav-divider" style="display:none"></div>
+        <!-- Main tree -->
+        <nav id="tree-nav" aria-label="タグカテゴリツリー" class="tree-nav-section"></nav>
+        <!-- History (shown last, below main tree) -->
+        <div class="tree-divider" id="history-divider" style="display:none"></div>
+        <nav id="history-nav" aria-label="履歴" class="tree-nav-section" style="display:none"></nav>
+      </div>
+      <!-- Sidebar footer: theme toggle (mobile only) -->
+      <div class="sidebar-footer">
+        <button id="sidebar-theme-btn" class="sidebar-theme-btn" title="テーマ切り替え">
+          <span class="sidebar-theme-icon">☀</span>
+          <span class="sidebar-theme-label">ライトモード</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Resizer -->
+    <div id="resizer" role="separator" aria-label="サイドバーリサイズ"></div>
+
+    <!-- Content Panel -->
+    <main id="content-panel">
+      <!-- Breadcrumb -->
+      <nav id="breadcrumb" aria-label="パンくずリスト">
+        <span class="breadcrumb-home" id="breadcrumb-home" role="button" tabindex="0">◈ ホーム</span>
+      </nav>
+
+      <!-- Welcome state -->
+      <div id="welcome-state" class="welcome-state">
+        <div class="welcome-icon">◈</div>
+        <h1 class="welcome-title">Danbooru Tag Explorer</h1>
+        <p class="welcome-desc">左のカテゴリツリーからカテゴリを選択するか、<br/>上部の検索バーでタグを検索してください。</p>
+        <div class="welcome-stats" id="welcome-stats">
+          <div class="stat-item">
+            <span class="stat-value" id="stat-categories">—</span>
+            <span class="stat-label">カテゴリ</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value" id="stat-tags">—</span>
+            <span class="stat-label">タグ</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tag list -->
+      <div id="tag-list-section" class="tag-list-section hidden">
+        <div class="tag-list-header">
+          <div class="tag-list-meta">
+            <h2 id="current-category-title" class="current-category-title"></h2>
+            <button id="pin-category-btn" class="btn-tiny hidden" title="このカテゴリをピン留め">📌</button>
+            <span id="current-tag-count" class="current-tag-count"></span>
+          </div>
+          <div class="tag-list-controls">
+            <label class="sort-label">表示:</label>
+            <select id="view-mode-select" class="sort-select">
+              <option value="list">リスト (詳細)</option>
+              <option value="grid">グリッド</option>
+            </select>
+            <label class="sort-label">並び順:</label>
+            <select id="sort-select" class="sort-select">
+              <option value="alpha">名前順</option>
+              <option value="post-desc">人気順 (多→少)</option>
+              <option value="post-asc">人気順 (少→多)</option>
+            </select>
+            <!-- Filter menu -->
+            <div class="filter-menu-wrap" id="filter-menu-wrap">
+              <button id="filter-menu-btn" class="filter-menu-btn" aria-haspopup="true" aria-expanded="false">
+                <span class="filter-menu-label">フィルタ</span>
+                <span class="filter-active-badge hidden" id="filter-active-badge"></span>
+                <span class="filter-menu-arrow">▾</span>
+              </button>
+              <div class="filter-menu-dropdown hidden" id="filter-menu-dropdown" role="menu">
+                <label class="filter-item"><input type="checkbox" class="filter-checkbox" value="fav"><span class="filter-dot" style="background:var(--danger)"></span><span>お気に入り</span></label>
+                <div class="filter-separator"></div>
+                <label class="filter-item"><input type="checkbox" class="filter-checkbox" value="0"><span class="filter-dot" style="background:var(--cat-0)"></span><span>一般</span></label>
+                <label class="filter-item"><input type="checkbox" class="filter-checkbox" value="1"><span class="filter-dot" style="background:var(--cat-1)"></span><span>アーティスト</span></label>
+                <label class="filter-item"><input type="checkbox" class="filter-checkbox" value="3"><span class="filter-dot" style="background:var(--cat-3)"></span><span>版権</span></label>
+                <label class="filter-item"><input type="checkbox" class="filter-checkbox" value="4"><span class="filter-dot" style="background:var(--cat-4)"></span><span>キャラクター</span></label>
+                <label class="filter-item"><input type="checkbox" class="filter-checkbox" value="5"><span class="filter-dot" style="background:var(--cat-5)"></span><span>メタデータ</span></label>
+                <label class="filter-item"><input type="checkbox" class="filter-checkbox" value="other"><span class="filter-dot" style="background:var(--cat-x)"></span><span>その他</span></label>
+                <div class="filter-footer">
+                  <button id="filter-clear-btn" class="filter-clear-btn">クリア</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Subcategory chips -->
+        <div id="subcategory-chips" class="subcategory-chips"></div>
+
+        <!-- Tags grid -->
+        <div id="tags-grid" class="tags-grid list-view"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Scratchpad (Bottom Panel) -->
+  <div id="scratchpad" class="scratchpad">
+    <div class="scratchpad-header">
+      <button id="scratchpad-toggle" class="scratchpad-toggle-btn" title="スクラッチパッドを折りたたむ" aria-label="スクラッチパッド折りたたみ">▼</button>
+      <span class="scratchpad-title">📝 Scratchpad</span>
+      <div class="scratchpad-actions">
+        <label class="toggle-label" style="margin-right: 12px; font-size: 11px;">
+          <input type="checkbox" id="replace-underscore" />
+          <span>_をスペースに変換</span>
+        </label>
+        <button id="scratchpad-copy" class="btn-icon" title="すべてコピー">
+          <span class="btn-icon-inner">📋</span>
+          <span class="btn-label">まとめてコピー</span>
+        </button>
+        <button id="scratchpad-clear" class="btn-icon" title="クリア">
+          <span class="btn-icon-inner">🗑</span>
+          <span class="btn-label">クリア</span>
+        </button>
+      </div>
+    </div>
+    <textarea id="scratchpad-input" class="scratchpad-input" placeholder="クリックしたタグがここにストックされます... カンマ区切りで自由に追加・編集できます。" spellcheck="false"></textarea>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" role="alert" aria-live="polite"></div>
+
+  <!-- Loading overlay -->
+  <div id="loading-overlay" class="loading-overlay">
+    <div class="loading-content">
+      <div class="loading-spinner"></div>
+      <p class="loading-text">タグデータを読み込み中…</p>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

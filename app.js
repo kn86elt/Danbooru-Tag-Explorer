@@ -1,0 +1,2046 @@
+/* =============================================
+   Danbooru Tag Explorer — app.js
+   Uses local data only (no external API calls)
+   ============================================= */
+
+'use strict';
+
+// ── State ──────────────────────────────────────
+const categoryTranslations = {
+  "Visual characteristics": "視覚・外観的な特徴",
+  "Image composition and style": "構図・スタイル",
+  "Artistic license": "アレンジ表現",
+  "Image composition": "構図",
+  "Backgrounds": "背景",
+  "Censorship": "修正・モザイク",
+  "Colors": "色",
+  "Focus tags": "フォーカスタグ",
+  "Prints": "柄・プリント",
+  "Text": "テキスト",
+  "Symbols": "シンボル",
+  "Year tags": "年代",
+  "Body": "身体",
+  "Body parts": "身体の部位",
+  "Hair": "髪",
+  "Face tags": "顔",
+  "Breasts tags": "胸",
+  "Ears tags": "耳",
+  "Shoulders": "肩",
+  "Skin color": "肌の色",
+  "Tail": "尻尾",
+  "Wings": "翼",
+  "Ass": "お尻",
+  "Hands": "手",
+  "Legs": "脚",
+  "Eyes": "目",
+  "Injury": "怪我・負傷",
+  "Attire and body accessories": "服装・アクセサリー",
+  "Attire": "服装",
+  "Dress": "ドレス",
+  "Uniforms": "制服・ユニフォーム",
+  "blouse": "ブラウス",
+  "shirt": "シャツ",
+  "sweater": "セーター",
+  "tank_top": "タンクトップ",
+  "skirt": "スカート",
+  "cardigan": "カーディガン",
+  "coat": "コート",
+  "Headwear": "帽子・頭部の装飾",
+  "Legwear": "レッグウェア（靴下等）",
+  "Neck and neckwear": "首飾り",
+  "Sexual attire": "セクシーな服装",
+  "Sleeves": "袖",
+  "Swimsuit": "水着",
+  "Eyewear": "眼鏡",
+  "japanese_clothes": "和服",
+  "Nudity": "裸体表現",
+  "Sex": "エッチな描写",
+  "Sex acts": "エッチな行為",
+  "Objects": "オブジェクト",
+  "Computer": "コンピュータ",
+  "Weapons": "武器",
+  "Audio tags": "オーディオ",
+  "Cards": "カード",
+  "Creatures": "生物",
+  "Animals": "動物",
+  "Legendary creatures": "伝説の生物",
+  "Plants": "植物",
+  "Flowers": "花",
+  "Tree": "木",
+  "Games": "ゲーム",
+  "Video game": "ビデオゲーム",
+  "Sports": "スポーツ",
+  "Real world": "現実世界",
+  "Companies and brand names": "企業・ブランド名",
+  "Holidays and celebrations": "休日・お祝い",
+  "Jobs": "職業",
+  "Locations": "場所",
+  "People": "人物",
+  "More": "その他",
+  "Family relationships": "家族関係",
+  "Food tags": "食べ物",
+  "Technology (includes Sci-Fi)": "テクノロジー(SF含む)",
+  "Water": "水",
+  "Fire": "炎",
+  "Copyrights, artists, projects and media": "版権・アーティスト・メディア",
+  "Genres of video games": "ゲームジャンル",
+  "Artists": "アーティスト",
+  "Characters": "キャラクター",
+  "Metatags": "メタタグ",
+  "Drawing Software": "お絵かきソフト"
+};
+
+function translateCategory(name) {
+  return categoryTranslations[name] || name;
+}
+
+const HISTORY_MAX = 30;
+
+const state = {
+  tree: null,           // parsed tag_tree.json
+  tagMeta: new Map(),   // name → {count, category}
+  translations: new Map(), // name → japanese
+  tagNodes: new Map(),  // name → {url, breadcrumb}
+  flatTags: [],         // [{name, url, breadcrumb[]}]
+  currentPath: [],
+  searchDebounce: null,
+  filterDebounce: null,
+  renderOffset: 0,
+  BATCH: 80,
+  minPostCount: 0,
+  _currentTags: [],
+  favTags: new Set(JSON.parse(localStorage.getItem('favTags') || '[]')),   // overwritten by server on boot
+  pinnedCats: JSON.parse(localStorage.getItem('pinnedCats') || '[]'),      // overwritten by server on boot
+  // History
+  history: {
+    searches:    JSON.parse(localStorage.getItem('history_searches')    || '[]'),
+    categories:  JSON.parse(localStorage.getItem('history_categories')  || '[]'),
+    stocks:      JSON.parse(localStorage.getItem('history_stocks')      || '[]'),
+  },
+  // Sidebar section collapse state
+  sectionCollapsed: JSON.parse(localStorage.getItem('sectionCollapsed') || '{}'),
+};
+
+// ── Persistence helpers ─────────────────────────────────────────────────────
+// localStorage is always updated as a local cache.
+// If Flask server is running, also sync to server (fire-and-forget).
+// Falls back silently when using plain python -m http.server.
+
+function saveFavs() {
+  const arr = Array.from(state.favTags);
+  localStorage.setItem('favTags', JSON.stringify(arr));
+  fetch('/api/favorites', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(arr),
+  }).catch(() => {}); // ignore if static server
+}
+
+function savePins() {
+  localStorage.setItem('pinnedCats', JSON.stringify(state.pinnedCats));
+  fetch('/api/pins', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(state.pinnedCats),
+  }).catch(() => {}); // ignore if static server
+}
+
+// Called once on boot: loads server-side favs/pins (shared across devices).
+// If the API is unavailable (non-Flask server), silently keeps localStorage values.
+async function loadServerSettings() {
+  try {
+    const res = await fetch('/api/settings', { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data.favTags)) {
+      state.favTags = new Set(data.favTags);
+      localStorage.setItem('favTags', JSON.stringify(data.favTags));
+    }
+    if (Array.isArray(data.pinnedCats)) {
+      state.pinnedCats = data.pinnedCats;
+      localStorage.setItem('pinnedCats', JSON.stringify(state.pinnedCats));
+    }
+  } catch (_e) {
+    // Static server or network error — stay with localStorage values
+  }
+}
+
+function saveSectionCollapsed() {
+  localStorage.setItem('sectionCollapsed', JSON.stringify(state.sectionCollapsed));
+}
+
+// Creates a collapsible section header for sidebar sections (fav / tree / history).
+// The immediately following sibling element is used as the collapsible body.
+function makeSectionHeader(label, sectionKey, badgeText) {
+  const header = document.createElement('div');
+  header.className = 'sidebar-section-header sidebar-section-header--toggle';
+
+  const chevron = document.createElement('span');
+  chevron.className = 'section-chevron';
+  chevron.classList.toggle('open', !state.sectionCollapsed[sectionKey]);
+
+  const titleEl = document.createElement('span');
+  titleEl.className = 'section-header-title';
+  titleEl.textContent = label;
+
+  header.appendChild(chevron);
+  header.appendChild(titleEl);
+
+  if (badgeText != null) {
+    const badge = document.createElement('span');
+    badge.className = 'tree-badge';
+    badge.textContent = badgeText;
+    header.appendChild(badge);
+  }
+
+  header.addEventListener('click', () => {
+    const newVal = !state.sectionCollapsed[sectionKey];
+    state.sectionCollapsed[sectionKey] = newVal;
+    saveSectionCollapsed();
+    chevron.classList.toggle('open', !newVal);
+    const body = header.nextElementSibling;
+    if (body) body.style.display = newVal ? 'none' : '';
+  });
+
+  return header;
+}
+
+// ── History ─────────────────────────────────────
+function saveHistory() {
+  localStorage.setItem('history_searches',   JSON.stringify(state.history.searches));
+  localStorage.setItem('history_categories', JSON.stringify(state.history.categories));
+  localStorage.setItem('history_stocks',     JSON.stringify(state.history.stocks));
+}
+
+function addHistorySearch(query) {
+  if (!query) return;
+  const arr = state.history.searches;
+  const idx = arr.findIndex(e => e.q === query);
+  if (idx !== -1) arr.splice(idx, 1);
+  arr.unshift({ q: query, t: Date.now() });
+  if (arr.length > HISTORY_MAX) arr.length = HISTORY_MAX;
+  saveHistory();
+  renderHistoryNav();
+}
+
+function addHistoryCategory(path) {
+  if (!path || path.length === 0) return;
+  if (path[0].startsWith('__')) return; // skip special paths
+  const key = JSON.stringify(path);
+  const arr = state.history.categories;
+  const idx = arr.findIndex(e => JSON.stringify(e.path) === key);
+  if (idx !== -1) arr.splice(idx, 1);
+  arr.unshift({ path: [...path], t: Date.now() });
+  if (arr.length > HISTORY_MAX) arr.length = HISTORY_MAX;
+  saveHistory();
+  renderHistoryNav();
+}
+
+function addHistoryStock(name) {
+  if (!name) return;
+  const arr = state.history.stocks;
+  const idx = arr.findIndex(e => e.name === name);
+  if (idx !== -1) arr.splice(idx, 1);
+  arr.unshift({ name, t: Date.now() });
+  if (arr.length > HISTORY_MAX) arr.length = HISTORY_MAX;
+  saveHistory();
+  renderHistoryNav();
+}
+
+function clearHistory() {
+  state.history.searches = [];
+  state.history.categories = [];
+  state.history.stocks = [];
+  saveHistory();
+  renderHistoryNav();
+  showToast('🗑 履歴をクリアしました');
+}
+
+// ── DOM refs ────────────────────────────────────
+const $ = id => document.getElementById(id);
+const els = {
+  globalSearch:    $('global-search'),
+  searchClear:     $('search-clear'),
+  searchOverlay:   $('search-results-overlay'),
+  searchList:      $('search-results-list'),
+  searchCount:     $('search-results-count'),
+  treeNav:         $('tree-nav'),
+  expandAll:       $('expand-all'),
+  collapseAll:     $('collapse-all'),
+  breadcrumb:      $('breadcrumb'),
+  breadcrumbHome:  $('breadcrumb-home'),
+  welcomeState:    $('welcome-state'),
+  tagListSection:  $('tag-list-section'),
+  categoryTitle:   $('current-category-title'),
+  tagCount:        $('current-tag-count'),
+  viewModeSelect:  $('view-mode-select'),
+  sortSelect:      $('sort-select'),
+  filterMenuBtn:      $('filter-menu-btn'),
+  filterMenuDropdown: $('filter-menu-dropdown'),
+  filterActiveBadge:  $('filter-active-badge'),
+  filterClearBtn:     $('filter-clear-btn'),
+  filterCheckboxes:   () => document.querySelectorAll('.filter-checkbox'),
+  subcatChips:     $('subcategory-chips'),
+  tagsGrid:        $('tags-grid'),
+  toast:           $('toast'),
+  loadingOverlay:  $('loading-overlay'),
+  tagCountBadge:   $('tag-count-badge'),
+  minPostFilter:   $('min-post-filter'),
+  resizer:         $('resizer'),
+  sidebar:         $('sidebar'),
+  sidebarOverlay:  $('sidebar-overlay'),
+  favNav:          $('fav-nav'),
+  favDivider:      $('fav-divider'),
+  historyNav:      $('history-nav'),
+  historyDivider:  $('history-divider'),
+  pinCategoryBtn:  $('pin-category-btn'),
+  statCategories:  $('stat-categories'),
+  statTags:        $('stat-tags'),
+  scratchpadInput: $('scratchpad-input'),
+  scratchpadCopy:  $('scratchpad-copy'),
+  scratchpadClear: $('scratchpad-clear'),
+  scratchpadToggle:$('scratchpad-toggle'),
+  replaceUnderscore:$('replace-underscore'),
+  themeToggle:     $('theme-toggle'),
+  mobileMenuBtn:   $('mobile-menu-btn'),
+  sidebarCloseBtn: $('sidebar-close-btn'),
+};
+
+// ── Boot ────────────────────────────────────────
+async function boot() {
+  try {
+    updateLoadingText('タグメタデータを読み込み中… (danbooru.csv)');
+    const [treeRes, csvRes, jaRes] = await Promise.all([
+      fetch('./data/tag_tree.json'),
+      fetch('./data/danbooru.csv'),
+      fetch('./data/ja.csv').catch(() => null)
+    ]);
+    if (!treeRes.ok) throw new Error(`tag_tree.json: HTTP ${treeRes.status}`);
+    if (!csvRes.ok)  throw new Error(`danbooru.csv: HTTP ${csvRes.status}`);
+
+    updateLoadingText('JSONを解析中…');
+    state.tree = await treeRes.json();
+
+    updateLoadingText('CSVを解析中…');
+    const csvText = await csvRes.text();
+    parseTagsCSV(csvText);
+
+    if (jaRes && jaRes.ok) {
+      updateLoadingText('翻訳データを解析中…');
+      const jaText = await jaRes.text();
+      parseTranslations(jaText);
+    }
+
+    updateLoadingText('ツリーを正規化中…');
+    cleanTreeKeys(state.tree);
+    mergeCaseInsensitiveSiblings(state.tree);
+
+    updateLoadingText('インデックスを構築中…');
+    await nextFrame();
+    buildFlatIndex(state.tree, []);
+
+    updateLoadingText('設定を読み込み中…');
+    await loadServerSettings();
+
+    updateLoadingText('ツリーを描画中…');
+    await nextFrame();
+    renderFavTree();
+    renderHistoryNav();
+    renderTree();
+    updateStats();
+    hideLoading();
+
+    state.observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) {
+        appendTagBatch();
+      }
+    }, { root: els.tagsGrid, rootMargin: '400px' });
+  } catch (e) {
+    console.error(e);
+    els.loadingOverlay.innerHTML =
+      `<div style="color:#f87171;text-align:center;padding:32px">
+        <p style="font-size:18px">⚠ データの読み込みに失敗しました</p>
+        <p style="font-size:12px;margin-top:8px;color:#7878a0">${e.message}</p>
+        <p style="font-size:11px;margin-top:4px;color:#505070">data/ フォルダに tag_tree.json と danbooru.csv があるか確認してください</p>
+       </div>`;
+  }
+}
+
+function nextFrame() {
+  return new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+}
+
+function updateLoadingText(msg) {
+  const el = els.loadingOverlay.querySelector('.loading-text');
+  if (el) el.textContent = msg;
+}
+
+function hideLoading() {
+  els.loadingOverlay.classList.add('hidden');
+  setTimeout(() => els.loadingOverlay.remove(), 400);
+}
+
+// ── CSV Parser ──────────────────────────────────
+// Format: name,category,post_count[,aliases]
+function parseTagsCSV(text) {
+  const lines = text.split('\n');
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const comma1 = line.indexOf(',');
+    const comma2 = line.indexOf(',', comma1 + 1);
+    const comma3 = line.indexOf(',', comma2 + 1);
+    if (comma1 === -1 || comma2 === -1) continue;
+    const name     = line.slice(0, comma1).trim();
+    const category = parseInt(line.slice(comma1 + 1, comma2).trim(), 10);
+    const countStr = comma3 === -1
+      ? line.slice(comma2 + 1).trim()
+      : line.slice(comma2 + 1, comma3).trim();
+    const count = parseInt(countStr, 10);
+    if (name && !isNaN(count)) {
+      state.tagMeta.set(name, { count, category });
+    }
+  }
+}
+
+function parseTranslations(text) {
+  const lines = text.split('\n');
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const parts = line.split(',');
+    if (parts.length >= 2) {
+      state.translations.set(parts[0].trim(), parts[1].trim());
+    }
+  }
+}
+
+// ── Tree Normalization ──────────────────────────
+function resolveTagName(rawName) {
+  if (state.tagMeta.has(rawName)) return rawName;
+
+  const underName = rawName.replace(/ /g, '_');
+  if (state.tagMeta.has(underName)) return underName;
+
+  const match = rawName.match(/^(.*?)\s+\([^)]+\)$/);
+  if (match) {
+    const stripped = match[1].replace(/ /g, '_');
+    if (state.tagMeta.has(stripped)) return stripped;
+  }
+  return rawName;
+}
+
+// ── Case-insensitive category deduplication ─────
+// Merge sibling keys that differ only in case (e.g. "Wings" vs "wings").
+// Canonical key: prefer the one whose first letter is uppercase; otherwise first seen.
+function mergedNode(a, b) {
+  if (a === null || a === undefined) return b;
+  if (b === null || b === undefined) return a;
+  // Both strings → keep a (first seen)
+  if (typeof a === 'string' && typeof b === 'string') return a;
+  // String + object → promote string to .self on the object
+  if (typeof a === 'string' && typeof b === 'object') {
+    const r = Object.assign({}, b);
+    if (!r.self) r.self = a;
+    return r;
+  }
+  if (typeof a === 'object' && typeof b === 'string') {
+    if (!a.self) a.self = b;
+    return a;
+  }
+  // Both objects → deep merge b into a copy of a
+  const result = Object.assign({}, a);
+  for (const [k, v] of Object.entries(b)) {
+    result[k] = k in result ? mergedNode(result[k], v) : v;
+  }
+  return result;
+}
+
+function mergeCaseInsensitiveSiblings(node) {
+  if (!node || typeof node !== 'object') return;
+  // Pass 1: detect duplicates and pick canonical key
+  const canonical = new Map(); // lowercase → chosen key
+  for (const key of Object.keys(node)) {
+    if (key === 'self') continue;
+    const lk = key.toLowerCase();
+    if (!canonical.has(lk)) {
+      canonical.set(lk, key);
+    } else {
+      // Prefer the key whose first character is uppercase
+      const cur = canonical.get(lk);
+      if (key[0] === key[0].toUpperCase() && key[0] !== key[0].toLowerCase()) {
+        canonical.set(lk, key); // switch canonical to this one
+      }
+    }
+  }
+  // Pass 2: merge non-canonical keys into canonical
+  for (const key of Object.keys(node)) {
+    if (key === 'self') continue;
+    const lk = key.toLowerCase();
+    const canon = canonical.get(lk);
+    if (canon !== key) {
+      // Merge this key into the canonical one
+      node[canon] = mergedNode(node[canon], node[key]);
+      delete node[key];
+    }
+  }
+  // Recurse into surviving children
+  for (const [key, val] of Object.entries(node)) {
+    if (key !== 'self' && typeof val === 'object' && val !== null) {
+      mergeCaseInsensitiveSiblings(val);
+    }
+  }
+}
+
+function cleanTreeKeys(node) {
+  if (!node || typeof node !== 'object') return;
+  for (const key of Object.keys(node)) {
+    if (key.startsWith('__')) continue;
+    const val = node[key];
+    if (typeof val === 'object') {
+      cleanTreeKeys(val);
+    } else if (typeof val === 'string') {
+      const newKey = resolveTagName(key);
+      if (newKey !== key) {
+        node[newKey] = val;
+        delete node[key];
+      }
+    }
+  }
+}
+
+// ── Flat Index ──────────────────────────────────
+function buildFlatIndex(node, breadcrumb) {
+  if (!node || typeof node !== 'object') return;
+  for (const [key, val] of Object.entries(node)) {
+    if (key === 'self') continue;
+    if (val === null) continue;
+    if (typeof val === 'string') {
+      state.flatTags.push({ name: key, url: val, breadcrumb: [...breadcrumb] });
+      state.tagNodes.set(key, { url: val, breadcrumb: [...breadcrumb] });
+    } else if (typeof val === 'object') {
+      if (val.self && typeof val.self === 'string') {
+        state.flatTags.push({ name: key, url: val.self, breadcrumb: [...breadcrumb] });
+        state.tagNodes.set(key, { url: val.self, breadcrumb: [...breadcrumb] });
+      }
+      buildFlatIndex(val, [...breadcrumb, key]);
+    }
+  }
+}
+
+function updateStats() {
+  const cats = Object.keys(state.tree || {}).length;
+  els.statCategories.textContent = cats.toLocaleString();
+  els.statTags.textContent       = state.flatTags.length.toLocaleString();
+  els.tagCountBadge.textContent  = state.tagMeta.size.toLocaleString() + ' tags';
+}
+
+// ── Tree Rendering ──────────────────────────────
+function renderFavTree() {
+  els.favNav.innerHTML = '';
+  const hasFavs = state.favTags.size > 0 || state.pinnedCats.length > 0;
+  els.favNav.style.display = hasFavs ? 'block' : 'none';
+  els.favDivider.style.display = hasFavs ? 'block' : 'none';
+  if (!hasFavs) return;
+
+  const totalCount = state.favTags.size + state.pinnedCats.length;
+  els.favNav.appendChild(makeSectionHeader('♥ お気に入り・ピン止め', 'fav', totalCount));
+
+  const body = document.createElement('div');
+  body.className = 'section-body';
+  if (state.sectionCollapsed.fav) body.style.display = 'none';
+  els.favNav.appendChild(body);
+
+  // All Fav Tags Node
+  if (state.favTags.size > 0) {
+    const allFavNode = document.createElement('div');
+    allFavNode.className = 'tree-node';
+    allFavNode.innerHTML = `<div class="tree-label"><span class="tree-label-text" style="color:var(--danger)">♡ お気に入りタグ</span><span class="tree-badge">${state.favTags.size}</span></div>`;
+    allFavNode.addEventListener('click', () => navigateTo(['__fav_tags__']));
+    body.appendChild(allFavNode);
+  }
+
+  // Pinned Categories
+  state.pinnedCats.forEach(path => {
+    const pinNode = document.createElement('div');
+    pinNode.className = 'tree-node';
+    let label;
+    if (path[0] === '__search_query__') {
+      label = `🔍 "${path[1]}"`;
+    } else {
+      label = '📌 ' + translateCategory(path[path.length - 1] || 'Root');
+    }
+    pinNode.innerHTML = `<div class="tree-label"><span class="tree-label-text">${escHtml(label)}</span></div>`;
+    pinNode.addEventListener('click', () => navigateTo(path));
+    body.appendChild(pinNode);
+  });
+}
+
+// ── History Nav Rendering ────────────────────────
+function renderHistoryNav() {
+  const nav = els.historyNav;
+  if (!nav) return;
+  nav.innerHTML = '';
+
+  const { searches, categories, stocks } = state.history;
+  const totalCount = searches.length + categories.length + stocks.length;
+  const hasAny = totalCount > 0;
+
+  nav.style.display = hasAny ? 'block' : 'none';
+  els.historyDivider.style.display = hasAny ? 'block' : 'none';
+  if (!hasAny) return;
+
+  nav.appendChild(makeSectionHeader('📋 履歴', 'history', totalCount));
+
+  const body = document.createElement('div');
+  body.className = 'section-body';
+  if (state.sectionCollapsed.history) body.style.display = 'none';
+  nav.appendChild(body);
+
+  // Helper: render a flat group of items under a type
+  function renderHistoryGroup(icon, items) {
+    items.forEach(({ label, sublabel, onNavigate, onDelete }) => {
+      const itemNode = document.createElement('div');
+      itemNode.className = 'tree-node history-item-node';
+
+      const itemLabel = document.createElement('div');
+      itemLabel.className = 'history-item-label';
+
+      const iconEl = document.createElement('span');
+      iconEl.className = 'history-type-icon';
+      iconEl.textContent = icon;
+
+      const textEl = document.createElement('span');
+      textEl.className = 'history-item-text';
+      textEl.textContent = label;
+      textEl.title = sublabel ? `${label}\n${sublabel}` : label;
+
+      itemLabel.appendChild(iconEl);
+      itemLabel.appendChild(textEl);
+
+      if (sublabel) {
+        const sub = document.createElement('span');
+        sub.className = 'history-item-sublabel';
+        sub.textContent = sublabel;
+        itemLabel.appendChild(sub);
+      }
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'history-item-del';
+      delBtn.textContent = '✕';
+      delBtn.title = '削除';
+      delBtn.addEventListener('click', e => { e.stopPropagation(); onDelete(); });
+      itemLabel.appendChild(delBtn);
+
+      itemLabel.addEventListener('click', e => {
+        e.stopPropagation();
+        closeSidebarOnMobile();
+        onNavigate();
+      });
+
+      itemNode.appendChild(itemLabel);
+      body.appendChild(itemNode);
+    });
+  }
+
+  // 🔍 検索
+  renderHistoryGroup('🔍', searches.map(e => ({
+    label: `"${e.q}"`,
+    sublabel: '',
+    onNavigate: () => navigateTo(['__search_query__', e.q]),
+    onDelete: () => {
+      const idx = state.history.searches.findIndex(x => x.q === e.q && x.t === e.t);
+      if (idx !== -1) state.history.searches.splice(idx, 1);
+      saveHistory(); renderHistoryNav();
+    },
+  })));
+
+  // 📁 カテゴリ
+  renderHistoryGroup('📁', categories.map(e => ({
+    label: translateCategory(e.path[e.path.length - 1]),
+    sublabel: e.path.length > 1
+      ? e.path.slice(0, -1).map(translateCategory).join(' › ')
+      : '',
+    onNavigate: () => navigateTo(e.path),
+    onDelete: () => {
+      const key = JSON.stringify(e.path);
+      const idx = state.history.categories.findIndex(x => JSON.stringify(x.path) === key && x.t === e.t);
+      if (idx !== -1) state.history.categories.splice(idx, 1);
+      saveHistory(); renderHistoryNav();
+    },
+  })));
+
+  // 🏷️ タグ（旧称: ストック）
+  renderHistoryGroup('🏷️', stocks.map(e => ({
+    label: e.name,
+    sublabel: '',
+    onNavigate: () => navigateTo(['__search_result__', e.name]),
+    onDelete: () => {
+      const idx = state.history.stocks.findIndex(x => x.name === e.name && x.t === e.t);
+      if (idx !== -1) state.history.stocks.splice(idx, 1);
+      saveHistory(); renderHistoryNav();
+    },
+  })));
+
+  // Clear all button
+  const clearWrap = document.createElement('div');
+  clearWrap.className = 'history-clear-wrap';
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'history-clear-btn';
+  clearBtn.textContent = '🗑 すべてクリア';
+  clearBtn.addEventListener('click', e => { e.stopPropagation(); clearHistory(); });
+  clearWrap.appendChild(clearBtn);
+  body.appendChild(clearWrap);
+}
+
+function renderTree() {
+  els.treeNav.innerHTML = '';
+
+  els.treeNav.appendChild(makeSectionHeader('📁 カテゴリ', 'tree'));
+
+  const body = document.createElement('div');
+  body.className = 'section-body';
+  if (state.sectionCollapsed.tree) body.style.display = 'none';
+  els.treeNav.appendChild(body);
+
+  for (const [key, val] of Object.entries(state.tree)) {
+    body.appendChild(createNode(key, val, 0));
+  }
+}
+
+function createNode(key, val, depth) {
+  if (val === null) val = {};
+  const isLeaf = typeof val === 'string';
+  const children = isLeaf ? [] : Object.entries(val).filter(([k, v]) => k !== 'self' && v !== null && typeof v !== 'string');
+  const hasChildren = children.length > 0;
+
+  const node = document.createElement('div');
+  node.className = 'tree-node';
+  node.dataset.depth = depth;
+  node.dataset.key = key;
+
+  const label = document.createElement('div');
+  label.className = 'tree-label';
+
+  const chevron = document.createElement('span');
+  chevron.className = 'tree-chevron';
+  chevron.textContent = hasChildren ? '▶' : '';
+
+  const folderIcon = document.createElement('span');
+  folderIcon.className = 'tree-folder-icon';
+
+  const text = document.createElement('span');
+  text.className = 'tree-label-text';
+  text.textContent = translateCategory(key);
+  text.title = key;
+
+  const badge = document.createElement('span');
+  badge.className = 'tree-badge';
+  if (hasChildren) badge.textContent = countLeaves(val);
+
+  label.appendChild(chevron);
+  label.appendChild(folderIcon);
+  label.appendChild(text);
+  label.appendChild(badge);
+  node.appendChild(label);
+
+  if (hasChildren) {
+    const childWrap = document.createElement('div');
+    childWrap.className = 'tree-children';
+    for (const [ck, cv] of children) {
+      childWrap.appendChild(createNode(ck, cv, depth + 1));
+    }
+    node.appendChild(childWrap);
+
+    label.addEventListener('click', e => {
+      e.stopPropagation();
+      const open = label.classList.toggle('open');
+      childWrap.classList.toggle('open', open);
+      navigateTo(getPathForNode(node));
+    });
+  } else {
+    label.addEventListener('click', e => {
+      e.stopPropagation();
+      navigateTo(getPathForNode(node));
+    });
+  }
+  return node;
+}
+
+function countLeaves(node, _seen = new WeakSet()) {
+  if (!node || typeof node !== 'object') return 0;
+  if (_seen.has(node)) return 0;
+  _seen.add(node);
+  let c = 0;
+  for (const [k, v] of Object.entries(node)) {
+    if (v === null) continue;
+    if (k === 'self') { c++; continue; }
+    if (typeof v === 'string') c++;
+    else c += countLeaves(v, _seen);
+  }
+  return c;
+}
+
+function getPathForNode(nodeEl) {
+  const path = [];
+  let cur = nodeEl;
+  while (cur && cur !== els.treeNav) {
+    if (cur.classList.contains('tree-node') && cur.dataset.key) {
+      path.unshift(cur.dataset.key);
+    }
+    cur = cur.parentElement;
+  }
+  return path;
+}
+
+// ── Mobile sidebar ──────────────────────────────
+function openSidebar() {
+  document.body.classList.add('sidebar-open');
+}
+
+function closeSidebar() {
+  document.body.classList.remove('sidebar-open');
+}
+
+function closeSidebarOnMobile() {
+  if (window.innerWidth <= 640) closeSidebar();
+}
+
+// ── Navigation ──────────────────────────────────
+function navigateTo(path) {
+  state.currentPath = path;
+  state.renderOffset = 0;
+
+  // Close sidebar on mobile when navigating
+  closeSidebarOnMobile();
+
+  document.querySelectorAll('.tree-label.active').forEach(el => el.classList.remove('active'));
+
+  if (path.length > 0 && path[0] === '__fav_tags__') {
+    renderBreadcrumb(['⭐ お気に入りタグ']);
+    els.welcomeState.classList.add('hidden');
+    els.tagListSection.classList.remove('hidden');
+    els.categoryTitle.textContent = 'お気に入りタグ';
+    els.subcatChips.innerHTML = '';
+    els.pinCategoryBtn.classList.add('hidden');
+
+    const tags = Array.from(state.favTags).map(name => {
+      const flat = state.flatTags.find(t => t.name === name);
+      return { name, url: flat ? flat.url : '' };
+    });
+    renderTagGrid(tags, [], path);
+    return;
+  }
+
+  if (path.length > 0 && path[0] === '__search_result__') {
+    const targetTag = path[1];
+    renderBreadcrumb(['🔍 タグ詳細 / 関連タグ', targetTag]);
+    els.welcomeState.classList.add('hidden');
+    els.tagListSection.classList.remove('hidden');
+    els.categoryTitle.textContent = '関連タグ';
+    els.subcatChips.innerHTML = '';
+    els.pinCategoryBtn.classList.add('hidden');
+
+    const relatedNames = getRelatedTags(targetTag);
+    const tags = [];
+    if (state.tagMeta.has(targetTag)) {
+      tags.push({ name: targetTag, url: state.tagNodes.get(targetTag)?.url || '' });
+    }
+
+    for (const r of relatedNames) {
+      if (r !== targetTag) {
+        tags.push({ name: r, url: state.tagNodes.get(r)?.url || '' });
+      }
+    }
+
+    renderTagGrid(tags, [], path);
+    return;
+  }
+
+  if (path.length > 0 && path[0] === '__search_query__') {
+    const query = path[1];
+    renderBreadcrumb([`🔍 "${query}"`]);
+    els.welcomeState.classList.add('hidden');
+    els.tagListSection.classList.remove('hidden');
+    els.categoryTitle.textContent = `"${query}" の検索結果`;
+    els.subcatChips.innerHTML = '';
+
+    // Pin button for search queries
+    els.pinCategoryBtn.classList.remove('hidden');
+    const isQPinned = state.pinnedCats.some(p => JSON.stringify(p) === JSON.stringify(path));
+    els.pinCategoryBtn.style.opacity = isQPinned ? '1' : '0.5';
+    els.pinCategoryBtn.onclick = () => {
+      if (isQPinned) {
+        state.pinnedCats = state.pinnedCats.filter(p => JSON.stringify(p) !== JSON.stringify(path));
+        showToast('📌 ピン留めを解除しました');
+      } else {
+        state.pinnedCats.push(path);
+        showToast('📌 ピン留めしました');
+      }
+      savePins();
+      renderFavTree();
+      navigateTo(path);
+    };
+
+    renderTagGrid(getSearchQueryTags(query), [], path);
+    return;
+  }
+
+  // Regular category navigation — record in history
+  if (path.length > 0) {
+    addHistoryCategory(path);
+
+    const activeNode = findTreeNode(path);
+    if (activeNode) {
+      activeNode.querySelector?.(':scope > .tree-label')?.classList.add('active');
+      expandAncestors(activeNode);
+    }
+  }
+  renderBreadcrumb(path);
+  renderContent(path);
+
+  // Pin button logic
+  if (path.length > 0) {
+    els.pinCategoryBtn.classList.remove('hidden');
+    const isPinned = state.pinnedCats.some(p => JSON.stringify(p) === JSON.stringify(path));
+    els.pinCategoryBtn.style.opacity = isPinned ? '1' : '0.5';
+    els.pinCategoryBtn.onclick = () => {
+      if (isPinned) {
+        state.pinnedCats = state.pinnedCats.filter(p => JSON.stringify(p) !== JSON.stringify(path));
+        showToast('📌 ピン留めを解除しました');
+      } else {
+        state.pinnedCats.push(path);
+        showToast('📌 ピン留めしました');
+      }
+      savePins();
+      renderFavTree();
+      navigateTo(path);
+    };
+  } else {
+    els.pinCategoryBtn.classList.add('hidden');
+  }
+}
+
+function findTreeNode(path) {
+  let cur = els.treeNav;
+  for (const key of path) {
+    const found = Array.from(cur.children).find(n => n.dataset?.key === key);
+    if (!found) return null;
+    const childWrap = found.querySelector('.tree-children');
+    cur = childWrap || found;
+    if (!childWrap) return found;
+  }
+  return cur?.closest?.('.tree-node') || null;
+}
+
+function expandAncestors(nodeEl) {
+  let cur = nodeEl.parentElement;
+  while (cur && cur !== els.treeNav) {
+    if (cur.classList.contains('tree-children')) {
+      cur.classList.add('open');
+      const label = cur.previousElementSibling;
+      if (label?.classList.contains('tree-label')) label.classList.add('open');
+    }
+    cur = cur.parentElement;
+  }
+}
+
+// ── Breadcrumb ──────────────────────────────────
+function renderBreadcrumb(path) {
+  while (els.breadcrumb.children.length > 1) {
+    els.breadcrumb.removeChild(els.breadcrumb.lastChild);
+  }
+  path.forEach((key, i) => {
+    const sep = document.createElement('span');
+    sep.className = 'breadcrumb-sep';
+    sep.textContent = '›';
+    els.breadcrumb.appendChild(sep);
+
+    const item = document.createElement('span');
+    item.className = 'breadcrumb-item' + (i === path.length - 1 ? ' current' : '');
+    item.textContent = translateCategory(key);
+    item.title = key;
+    if (i < path.length - 1) {
+      item.addEventListener('click', () => navigateTo(path.slice(0, i + 1)));
+    }
+    els.breadcrumb.appendChild(item);
+  });
+}
+
+// ── Content Rendering ───────────────────────────
+function getNodeAt(path) {
+  let cur = state.tree;
+  for (const key of path) {
+    if (!cur || typeof cur !== 'object') return null;
+    cur = cur[key];
+  }
+  return cur;
+}
+
+function collectItems(node) {
+  const subcats = [], tags = [];
+  if (!node || typeof node !== 'object') return { subcats, tags };
+  for (const [key, val] of Object.entries(node)) {
+    if (key === 'self' || val === null) continue;
+    if (typeof val === 'string') {
+      tags.push({ name: key, url: val });
+    } else if (typeof val === 'object') {
+      if (val.self && typeof val.self === 'string') tags.push({ name: key, url: val.self });
+      subcats.push({ name: key, node: val });
+    }
+  }
+  return { subcats, tags };
+}
+
+function getAllTagsDeep(node, _seen = new WeakSet()) {
+  const tags = [];
+  if (!node || typeof node !== 'object') return tags;
+  if (_seen.has(node)) return tags;
+  _seen.add(node);
+  for (const [key, val] of Object.entries(node)) {
+    if (key === 'self' || val === null) continue;
+    if (typeof val === 'string') tags.push({ name: key, url: val });
+    else if (typeof val === 'object') {
+      if (val.self && typeof val.self === 'string') tags.push({ name: key, url: val.self });
+      tags.push(...getAllTagsDeep(val, _seen));
+    }
+  }
+  return tags;
+}
+
+function renderContent(path) {
+  els.welcomeState.classList.add('hidden');
+  els.tagListSection.classList.remove('hidden');
+
+  const node = getNodeAt(path);
+  const { subcats } = collectItems(node);
+  els.categoryTitle.textContent = translateCategory(path[path.length - 1] || 'Root');
+  els.categoryTitle.title = path[path.length - 1] || 'Root';
+
+  els.subcatChips.innerHTML = '';
+
+  const allTagsDeep = getAllTagsDeep(node);
+
+  const catKey = path[path.length - 1];
+  if (catKey && state.tagMeta.has(catKey)) {
+    const alreadyListed = allTagsDeep.some(t => t.name === catKey);
+    if (!alreadyListed) {
+      const nodeInfo = state.tagNodes.get(catKey);
+      allTagsDeep.unshift({ name: catKey, url: nodeInfo?.url || '' });
+    }
+  }
+
+  renderTagGrid(allTagsDeep, subcats, path);
+}
+
+// Return the set of active filter values from the checkboxes.
+// Empty set means "no filter selected" → show all.
+function getActiveFilters() {
+  const s = new Set();
+  els.filterCheckboxes().forEach(cb => { if (cb.checked) s.add(cb.value); });
+  return s;
+}
+
+const FILTER_TOTAL = 7; // fav + 6 categories
+const KNOWN_CATS = new Set([0, 1, 3, 4, 5]);
+
+function applyTagFilter(tags) {
+  const active = getActiveFilters();
+  if (active.size === 0 || active.size === FILTER_TOTAL) return tags;
+  return tags.filter(t => {
+    const meta = state.tagMeta.get(t.name);
+    const cat  = meta?.category;
+    if (active.has('fav')   && state.favTags.has(t.name))               return true;
+    if (active.has('0')     && cat === 0)                                return true;
+    if (active.has('1')     && cat === 1)                                return true;
+    if (active.has('3')     && cat === 3)                                return true;
+    if (active.has('4')     && cat === 4)                                return true;
+    if (active.has('5')     && cat === 5)                                return true;
+    if (active.has('other') && (cat == null || !KNOWN_CATS.has(cat)))    return true;
+    return false;
+  });
+}
+
+function updateFilterBadge() {
+  const active = getActiveFilters();
+  const partial = active.size > 0 && active.size < FILTER_TOTAL;
+  els.filterActiveBadge.textContent = active.size;
+  els.filterActiveBadge.classList.toggle('hidden', !partial);
+  els.filterMenuBtn.classList.toggle('filter-active', partial);
+}
+
+function saveFilterState() {
+  const vals = [];
+  els.filterCheckboxes().forEach(cb => { if (cb.checked) vals.push(cb.value); });
+  localStorage.setItem('tagFilter', JSON.stringify(vals));
+}
+
+function renderTagGrid(tags, subcats, path) {
+  const minCount  = state.minPostCount;
+  const sort      = els.sortSelect.value;
+
+  let allTags = [...tags];
+
+  allTags = applyTagFilter(allTags);
+
+  if (minCount > 0) {
+    allTags = allTags.filter(t => {
+      const meta = state.tagMeta.get(t.name);
+      return meta ? meta.count >= minCount : true;
+    });
+  }
+
+  // Sort
+  if (sort === 'alpha') {
+    allTags.sort((a, b) => a.name.localeCompare(b.name));
+  } else if (sort === 'post-desc') {
+    allTags.sort((a, b) => getCount(b.name) - getCount(a.name));
+  } else if (sort === 'post-asc') {
+    allTags.sort((a, b) => getCount(a.name) - getCount(b.name));
+  }
+
+  // Deduplicate
+  const seen = new Set();
+  allTags = allTags.filter(t => seen.has(t.name) ? false : (seen.add(t.name), true));
+
+  // Pin exact match to front in related tag mode
+  if (state.currentPath[0] === '__search_result__') {
+    const exactTerm = state.currentPath[1];
+    const exactIdx = allTags.findIndex(t => t.name === exactTerm);
+    if (exactIdx > 0) {
+      const [exactTag] = allTags.splice(exactIdx, 1);
+      allTags.unshift(exactTag);
+    }
+  }
+
+  els.tagCount.textContent = `${allTags.length} tags`;
+  state.renderOffset = 0;
+  state._currentTags = allTags;
+
+  els.tagsGrid.innerHTML = '';
+
+  // Up One Level card
+  if (path && path.length > 0 && path[0] !== '__fav_tags__') {
+    els.tagsGrid.appendChild(createUpCard(path));
+  }
+
+  // Render subcats as cards first
+  subcats.forEach(sc => {
+    els.tagsGrid.appendChild(createSubcatCard(sc, path));
+  });
+
+  appendTagBatch();
+}
+
+// ── Up Card ─────────────────────────────────────
+function createUpCard(path) {
+  const card = document.createElement('div');
+  card.className = 'tag-card subcat-card';
+  card.style.setProperty('--cat-color', 'var(--text-muted)');
+
+  const name = document.createElement('span');
+  name.className = 'tag-name';
+  name.textContent = '📁 .. (上の階層へ戻る)';
+
+  card.appendChild(name);
+  card.addEventListener('click', () => {
+    if (path[0] === '__search_result__' || path[0] === '__search_query__') navigateTo([]);
+    else navigateTo(path.slice(0, -1));
+  });
+  return card;
+}
+
+function createSubcatCard(sc, path) {
+  const card = document.createElement('div');
+  card.className = 'tag-card subcat-card';
+  card.style.setProperty('--cat-color', 'var(--accent)');
+
+  const name = document.createElement('span');
+  name.className = 'tag-name';
+  name.textContent = '📁 ' + translateCategory(sc.name);
+  name.title = sc.name;
+
+  const count = document.createElement('span');
+  count.className = 'tag-post-count';
+  count.textContent = countLeaves(sc.node);
+
+  card.appendChild(name);
+  card.appendChild(count);
+  card.addEventListener('click', () => navigateTo([...path, sc.name]));
+  return card;
+}
+
+function getCount(name) {
+  return state.tagMeta.get(name)?.count ?? 0;
+}
+
+const _wordTipCache = new Map();
+function getWordTooltip(word) {
+  if (_wordTipCache.has(word)) return _wordTipCache.get(word);
+
+  const exactJa = state.translations.get(word);
+  if (exactJa) {
+    const tip = exactJa;
+    _wordTipCache.set(word, tip);
+    return tip;
+  }
+
+  let bestName = null, bestCount = -1;
+  const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let pattern;
+  try { pattern = new RegExp(`(^|_)${escapedWord}(_|$)`); }
+  catch (_) { _wordTipCache.set(word, ''); return ''; }
+  for (const [name, meta] of state.tagMeta.entries()) {
+    if (pattern.test(name) && meta.count > bestCount) {
+      bestCount = meta.count;
+      bestName  = name;
+    }
+  }
+
+  let tip = '';
+  if (bestName) {
+    const bestJa = state.translations.get(bestName);
+    tip = bestJa ? `例: ${bestName}（${bestJa}）` : `例: ${bestName}`;
+  }
+  _wordTipCache.set(word, tip);
+  return tip;
+}
+
+function appendTagBatch() {
+  const allTags = state._currentTags || [];
+  if (state.renderOffset >= allTags.length) return;
+
+  const slice = allTags.slice(state.renderOffset, state.renderOffset + state.BATCH);
+
+  const frag = document.createDocumentFragment();
+  slice.forEach(tag => {
+    try {
+      frag.appendChild(createTagCard(tag));
+    } catch (e) {
+      console.warn('[TagExplorer] createTagCard failed for:', tag.name, e.message);
+    }
+  });
+  els.tagsGrid.appendChild(frag);
+  state.renderOffset += slice.length;
+
+  let sentinel = els.tagsGrid.querySelector('.scroll-sentinel');
+  if (sentinel) sentinel.remove();
+
+  if (state.renderOffset < allTags.length) {
+    sentinel = document.createElement('div');
+    sentinel.className = 'scroll-sentinel';
+    els.tagsGrid.appendChild(sentinel);
+    state.observer.observe(sentinel);
+  }
+}
+
+function createTagCard(tag) {
+  const meta = state.tagMeta.get(tag.name);
+  const card = document.createElement('div');
+  card.className = 'tag-card';
+  card.dataset.tagName = tag.name;
+
+  const catColor = getCategoryColor(meta?.category);
+  card.style.setProperty('--cat-color', catColor);
+
+  const jaText = state.translations.get(tag.name);
+
+  if (state.favTags.has(tag.name)) {
+    const indicator = document.createElement('div');
+    indicator.className = 'fav-indicator';
+    card.appendChild(indicator);
+  }
+
+  const name = document.createElement('span');
+  name.className = 'tag-name';
+  name.title = jaText ? `${tag.name}\n${jaText}` : tag.name;
+
+  const words = tag.name.split('_');
+  words.forEach((word, index) => {
+    const wordSpan = document.createElement('span');
+    wordSpan.className = 'tag-word-link';
+    wordSpan.textContent = word;
+
+    if (words.length > 1) {
+      const tip = getWordTooltip(word);
+      if (tip) wordSpan.title = tip;
+    }
+
+    wordSpan.addEventListener('click', e => {
+      e.stopPropagation();
+      navigateTo(['__search_result__', word]);
+    });
+    name.appendChild(wordSpan);
+
+    if (index < words.length - 1) {
+      const underSpan = document.createElement('span');
+      underSpan.textContent = '_';
+      underSpan.className = 'tag-word-sep';
+      name.appendChild(underSpan);
+    }
+  });
+
+  if (jaText) {
+    const jaSpan = document.createElement('span');
+    jaSpan.className = 'tag-ja';
+    jaSpan.textContent = `(${jaText})`;
+    name.appendChild(document.createTextNode(' '));
+    name.appendChild(jaSpan);
+  }
+
+  const count = document.createElement('span');
+  count.className = 'tag-post-count';
+  count.textContent = meta ? formatCount(meta.count) : '';
+
+  const actions = document.createElement('div');
+  actions.className = 'tag-actions';
+
+  const favBtn = document.createElement('button');
+  favBtn.className = 'tag-btn';
+  favBtn.textContent = state.favTags.has(tag.name) ? '♥' : '♡';
+  favBtn.title = 'お気に入り';
+  favBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (state.favTags.has(tag.name)) state.favTags.delete(tag.name);
+    else state.favTags.add(tag.name);
+    saveFavs();
+    renderFavTree();
+
+    if (state.favTags.has(tag.name)) {
+      favBtn.textContent = '♥';
+      if (!card.querySelector('.fav-indicator')) {
+        const ind = document.createElement('div');
+        ind.className = 'fav-indicator';
+        card.appendChild(ind);
+      }
+    } else {
+      favBtn.textContent = '♡';
+      card.querySelector('.fav-indicator')?.remove();
+    }
+  });
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'tag-btn';
+  copyBtn.textContent = '📋';
+  copyBtn.title = 'コピー';
+  copyBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    copyToClipboard(formatTagForExport(tag.name));
+  });
+
+  const wikiBtn = document.createElement('button');
+  wikiBtn.className = 'tag-btn';
+  wikiBtn.textContent = '↗';
+  wikiBtn.title = 'Wiki';
+
+  // Desktop: hover shows preview, click opens link
+  wikiBtn.addEventListener('mouseenter', e => { if (!isCoarsePointer()) showWikiPreview(e, tag, meta); });
+  wikiBtn.addEventListener('mousemove',  e => { if (!isCoarsePointer()) repositionWikiPreview(e); });
+  wikiBtn.addEventListener('mouseleave',   () => { if (!isCoarsePointer()) hideWikiPreview(); });
+
+  // Click: desktop=open link / mobile=1st tap preview, 2nd tap open
+  wikiBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (isCoarsePointer()) {
+      if (wikiPreviewEl._activeTag === tag.name && wikiPreviewEl.style.display === 'block') {
+        openWikiLink(tag);
+        hideWikiPreview();
+      } else {
+        showWikiPreview(e, tag, meta);
+        wikiPreviewEl._activeTag = tag.name;
+      }
+    } else {
+      openWikiLink(tag);
+    }
+  });
+
+  actions.appendChild(favBtn);
+  actions.appendChild(copyBtn);
+  actions.appendChild(wikiBtn);
+  card.appendChild(name);
+  card.appendChild(count);
+  card.appendChild(actions);
+  card.addEventListener('click', () => toggleTagInScratchpad(tag.name));
+  return card;
+}
+
+function getCategoryColor(cat) {
+  const map = { 0: 'var(--cat-0)', 1: 'var(--cat-1)', 3: 'var(--cat-3)', 4: 'var(--cat-4)', 5: 'var(--cat-5)' };
+  return map[cat] ?? 'var(--cat-x)';
+}
+
+function formatCount(n) {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000)     return (n / 1_000).toFixed(1) + 'k';
+  return String(n);
+}
+
+// ── Search ──────────────────────────────────────
+function getSearchQueryTags(query) {
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const minCount = state.minPostCount;
+  const results = [];
+  for (const [tagName, meta] of state.tagMeta.entries()) {
+    if (minCount > 0 && meta.count < minCount) continue;
+    const jaText = state.translations.get(tagName) || '';
+    const nameL = tagName.toLowerCase();
+    const jaL   = jaText.toLowerCase();
+    if (tokens.every(t => nameL.includes(t) || jaL.includes(t))) {
+      results.push({ name: tagName, url: state.tagNodes.get(tagName)?.url || '' });
+    }
+  }
+  return results;
+}
+
+function getRelatedTags(tagName) {
+  const parts = tagName.split('_');
+  function findTags(str) {
+    const res = [];
+    for (const t of state.tagMeta.keys()) {
+      if (t.includes(str)) res.push(t);
+    }
+    return res;
+  }
+
+  let results = findTags(tagName);
+  if (results.length > 5 || parts.length === 1) return results.slice(0, 100);
+
+  const set = new Set(results);
+  const suffix = parts.slice(1).join('_');
+  const prefix = parts.slice(0, -1).join('_');
+
+  if (suffix.length > 3) findTags(suffix).forEach(t => set.add(t));
+  if (prefix.length > 3) findTags(prefix).forEach(t => set.add(t));
+
+  if (set.size < 10) {
+    const majorWord = parts.reduce((a, b) => a.length > b.length ? a : b);
+    if (majorWord.length > 3) findTags(majorWord).forEach(t => set.add(t));
+  }
+
+  return Array.from(set).sort((a, b) => getCount(b) - getCount(a)).slice(0, 100);
+}
+
+function handleSearch(query) {
+  query = query.trim();
+  if (!query) { els.searchOverlay.classList.add('hidden'); return; }
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const minCount = state.minPostCount;
+
+  const results = [];
+  for (const [tagName, meta] of state.tagMeta.entries()) {
+    if (minCount > 0 && meta.count < minCount) continue;
+    const jaText = state.translations.get(tagName) || '';
+    const nameL = tagName.toLowerCase();
+    const jaL   = jaText.toLowerCase();
+    if (tokens.every(t => nameL.includes(t) || jaL.includes(t))) {
+      results.push(tagName);
+      if (results.length >= 60) break;
+    }
+  }
+
+  results.sort((a, b) => getCount(b) - getCount(a));
+
+  els.searchCount.textContent = results.length;
+  els.searchList.innerHTML = '';
+  const frag = document.createDocumentFragment();
+
+  results.forEach(tagName => {
+    const meta = state.tagMeta.get(tagName);
+    const nodeInfo = state.tagNodes.get(tagName);
+    const breadcrumb = nodeInfo ? nodeInfo.breadcrumb : [];
+
+    const li = document.createElement('li');
+    li.className = 'search-result-item';
+
+    const tagSpan = document.createElement('span');
+    tagSpan.className = 'search-result-tag';
+    const jaText = state.translations.get(tagName);
+    let displayName = highlightMatch(tagName, tokens);
+    if (jaText) displayName += ` <span class="tag-ja">(${highlightMatch(jaText, tokens)})</span>`;
+    tagSpan.innerHTML = displayName;
+
+    const pathSpan = document.createElement('span');
+    pathSpan.className = 'search-result-path';
+    if (breadcrumb.length > 0) {
+      pathSpan.textContent = breadcrumb.map(translateCategory).join(' › ');
+      pathSpan.title = breadcrumb.join(' > ');
+    } else {
+      pathSpan.textContent = '未分類 ';
+      pathSpan.style.color = 'var(--accent)';
+    }
+
+    const countSpan = document.createElement('span');
+    countSpan.className = 'search-result-count';
+    countSpan.textContent = meta ? formatCount(meta.count) : '';
+
+    li.appendChild(tagSpan);
+    li.appendChild(pathSpan);
+    li.appendChild(countSpan);
+
+    li.addEventListener('click', () => {
+      els.searchOverlay.classList.add('hidden');
+      els.globalSearch.value = '';
+      navigateTo(['__search_result__', tagName]);
+    });
+    frag.appendChild(li);
+  });
+
+  els.searchList.appendChild(frag);
+  els.searchOverlay.classList.remove('hidden');
+}
+
+function highlightMatch(text, tokens) {
+  const textL = text.toLowerCase();
+  const ranges = [];
+  for (const t of tokens) {
+    let idx = 0;
+    while ((idx = textL.indexOf(t, idx)) !== -1) {
+      ranges.push([idx, idx + t.length]);
+      idx += t.length;
+    }
+  }
+  if (ranges.length === 0) return escHtml(text);
+  ranges.sort((a, b) => a[0] - b[0]);
+  const merged = [ranges[0]];
+  for (let i = 1; i < ranges.length; i++) {
+    const last = merged[merged.length - 1];
+    if (ranges[i][0] <= last[1]) last[1] = Math.max(last[1], ranges[i][1]);
+    else merged.push(ranges[i]);
+  }
+  let out = '', cur = 0;
+  for (const [s, e] of merged) {
+    out += escHtml(text.slice(cur, s));
+    out += `<mark class="search-result-mark">${escHtml(text.slice(s, e))}</mark>`;
+    cur = e;
+  }
+  return out + escHtml(text.slice(cur));
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Scratchpad & Clipboard ──────────────────────
+function formatTagForExport(tagName) {
+  let res = tagName.replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+  if (els.replaceUnderscore && els.replaceUnderscore.checked) {
+    res = res.replace(/_/g, ' ');
+  }
+  return res;
+}
+
+function copyToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => showToast(`📋 コピーしました`));
+  } else {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-999999px";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      showToast(`📋 コピーしました`);
+    } catch (error) {
+      console.error('Copy failed', error);
+      showToast('⚠️ コピーに失敗しました');
+    } finally {
+      textArea.remove();
+    }
+  }
+}
+
+function toggleTagInScratchpad(name) {
+  const formatted = formatTagForExport(name);
+  const input = els.scratchpadInput;
+  let text = input.value;
+  let tags = text.split(',').map(t => t.trim()).filter(Boolean);
+
+  const idx = tags.indexOf(formatted);
+  if (idx > -1) {
+    tags.splice(idx, 1);
+    showToast(`🗑 ストック削除: ${formatted}`);
+  } else {
+    tags.push(formatted);
+    showToast(`📝 ストック追加: ${formatted}`);
+    addHistoryStock(name); // ← record in history
+  }
+
+  input.value = tags.length > 0 ? tags.join(', ') + ', ' : '';
+  input.scrollTop = input.scrollHeight;
+}
+
+function showToast(msg, duration = 2000) {
+  els.toast.textContent = msg;
+  els.toast.classList.add('show');
+  clearTimeout(els.toast._timer);
+  els.toast._timer = setTimeout(() => els.toast.classList.remove('show'), duration);
+}
+
+// ── Scratchpad collapse ─────────────────────────
+let scratchpadExpanded = true;
+
+function initScratchpadToggle() {
+  const btn = els.scratchpadToggle;
+  const pad = $('scratchpad');
+  if (!btn || !pad) return;
+
+  // Restore state
+  const savedCollapsed = localStorage.getItem('scratchpadCollapsed') === 'true';
+  if (savedCollapsed) {
+    pad.classList.add('collapsed');
+    btn.textContent = '▲';
+    btn.title = 'スクラッチパッドを開く';
+    scratchpadExpanded = false;
+  }
+
+  btn.addEventListener('click', () => {
+    scratchpadExpanded = !scratchpadExpanded;
+    pad.classList.toggle('collapsed', !scratchpadExpanded);
+    btn.textContent = scratchpadExpanded ? '▼' : '▲';
+    btn.title = scratchpadExpanded ? 'スクラッチパッドを折りたたむ' : 'スクラッチパッドを開く';
+    localStorage.setItem('scratchpadCollapsed', String(!scratchpadExpanded));
+  });
+}
+
+// ── Sidebar Resizer ─────────────────────────────
+function initResizer() {
+  let dragging = false, startX = 0, startW = 0;
+  els.resizer.addEventListener('mousedown', e => {
+    dragging = true; startX = e.clientX; startW = els.sidebar.offsetWidth;
+    els.resizer.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const w = Math.max(180, Math.min(480, startW + e.clientX - startX));
+    els.sidebar.style.width = w + 'px';
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    els.resizer.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    localStorage.setItem('sidebarWidth', els.sidebar.offsetWidth);
+  });
+}
+
+// ── Mobile sidebar init ─────────────────────────
+function initMobileSidebar() {
+  if (els.mobileMenuBtn) {
+    els.mobileMenuBtn.addEventListener('click', () => {
+      document.body.classList.toggle('sidebar-open');
+    });
+  }
+  if (els.sidebarOverlay) {
+    els.sidebarOverlay.addEventListener('click', () => {
+      closeSidebar();
+    });
+  }
+  if (els.sidebarCloseBtn) {
+    els.sidebarCloseBtn.addEventListener('click', () => {
+      closeSidebar();
+    });
+  }
+}
+
+// ── Re-render Helper ────────────────────────────
+function rerenderCurrent() {
+  if (state.currentPath.length === 0) return;
+  const isSpecial = state.currentPath[0] === '__search_result__'
+                 || state.currentPath[0] === '__fav_tags__'
+                 || state.currentPath[0] === '__search_query__';
+  if (isSpecial) navigateTo(state.currentPath);
+  else renderContent(state.currentPath);
+}
+
+// ── Event Listeners ─────────────────────────────
+els.expandAll.addEventListener('click', () => {
+  // Auto-expand the category section if it is collapsed
+  if (state.sectionCollapsed.tree) {
+    state.sectionCollapsed.tree = false;
+    saveSectionCollapsed();
+    const treeHeader = els.treeNav.querySelector('.sidebar-section-header--toggle');
+    const treeBody   = els.treeNav.querySelector('.section-body');
+    if (treeHeader) treeHeader.querySelector('.section-chevron')?.classList.add('open');
+    if (treeBody)   treeBody.style.display = '';
+  }
+  document.querySelectorAll('#tree-nav .tree-children').forEach(el => el.classList.add('open'));
+  document.querySelectorAll('#tree-nav .tree-label').forEach(el => {
+    if (el.querySelector('.tree-chevron')) el.classList.add('open');
+  });
+});
+
+els.collapseAll.addEventListener('click', () => {
+  document.querySelectorAll('#tree-nav .tree-children').forEach(el => el.classList.remove('open'));
+  document.querySelectorAll('#tree-nav .tree-label').forEach(el => el.classList.remove('open'));
+});
+
+els.sortSelect.addEventListener('change', () => {
+  localStorage.setItem('sortSelect', els.sortSelect.value);
+  rerenderCurrent();
+});
+
+// ── Filter menu ─────────────────────────────────
+const filterDrop = els.filterMenuDropdown;
+
+els.filterMenuBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  const open = filterDrop.classList.toggle('hidden');
+  els.filterMenuBtn.setAttribute('aria-expanded', String(!open));
+  if (!open) {
+    const rect = els.filterMenuBtn.getBoundingClientRect();
+    filterDrop.style.top   = (rect.bottom + 4) + 'px';
+    filterDrop.style.right = (window.innerWidth - rect.right) + 'px';
+  }
+});
+
+document.addEventListener('click', e => {
+  if (!filterDrop.classList.contains('hidden') &&
+      !filterDrop.contains(e.target) &&
+      e.target !== els.filterMenuBtn) {
+    filterDrop.classList.add('hidden');
+    els.filterMenuBtn.setAttribute('aria-expanded', 'false');
+  }
+});
+
+els.filterCheckboxes().forEach(cb => {
+  cb.addEventListener('change', () => {
+    updateFilterBadge();
+    saveFilterState();
+    rerenderCurrent();
+  });
+});
+
+els.filterClearBtn.addEventListener('click', () => {
+  els.filterCheckboxes().forEach(cb => { cb.checked = false; });
+  updateFilterBadge();
+  saveFilterState();
+  rerenderCurrent();
+});
+
+// View mode toggle
+const viewMode = localStorage.getItem('viewMode') || 'list';
+els.viewModeSelect.value = viewMode;
+if (viewMode === 'list') els.tagsGrid.classList.add('list-view');
+else els.tagsGrid.classList.remove('list-view');
+
+els.viewModeSelect.addEventListener('change', e => {
+  const mode = e.target.value;
+  localStorage.setItem('viewMode', mode);
+  if (mode === 'list') els.tagsGrid.classList.add('list-view');
+  else els.tagsGrid.classList.remove('list-view');
+});
+
+// Scratchpad Settings
+if (els.replaceUnderscore) {
+  els.replaceUnderscore.checked = localStorage.getItem('replaceUnderscore') === 'true';
+  els.replaceUnderscore.addEventListener('change', e => {
+    localStorage.setItem('replaceUnderscore', e.target.checked);
+  });
+}
+
+// Theme toggle — shared logic used by both header checkbox and sidebar button
+function setTheme(light) {
+  document.body.classList.toggle('light-theme', light);
+  localStorage.setItem('theme', light ? 'light' : 'dark');
+  // Sync header checkbox
+  if (els.themeToggle) els.themeToggle.checked = light;
+  // Sync sidebar button label/icon
+  const sidebarBtn = document.getElementById('sidebar-theme-btn');
+  if (sidebarBtn) {
+    sidebarBtn.querySelector('.sidebar-theme-icon').textContent  = light ? '☽' : '☀';
+    sidebarBtn.querySelector('.sidebar-theme-label').textContent = light ? 'ダークモードに切り替え' : 'ライトモードに切り替え';
+  }
+}
+
+// Apply saved theme on load
+setTheme(localStorage.getItem('theme') === 'light');
+
+// Header checkbox
+els.themeToggle.addEventListener('change', e => setTheme(e.target.checked));
+
+// Sidebar footer button (mobile)
+document.getElementById('sidebar-theme-btn')?.addEventListener('click', () => {
+  setTheme(!document.body.classList.contains('light-theme'));
+});
+
+// Restore additional settings on startup
+{
+  const savedSort = localStorage.getItem('sortSelect');
+  if (savedSort) els.sortSelect.value = savedSort;
+
+  const savedFilter = localStorage.getItem('tagFilter');
+  if (savedFilter) {
+    try {
+      const vals = JSON.parse(savedFilter);
+      els.filterCheckboxes().forEach(cb => { cb.checked = vals.includes(cb.value); });
+    } catch (_) {}
+  }
+  updateFilterBadge();
+
+  const savedMinPost = localStorage.getItem('minPostFilter');
+  if (savedMinPost) {
+    els.minPostFilter.value = savedMinPost;
+    state.minPostCount = parseInt(savedMinPost, 10) || 0;
+  }
+
+  const savedScratchpad = localStorage.getItem('scratchpad');
+  if (savedScratchpad) els.scratchpadInput.value = savedScratchpad;
+
+  const savedSidebarW = localStorage.getItem('sidebarWidth');
+  if (savedSidebarW) els.sidebar.style.width = savedSidebarW + 'px';
+}
+
+// Min post count filter — debounced
+els.minPostFilter.addEventListener('input', () => {
+  clearTimeout(state.filterDebounce);
+  state.filterDebounce = setTimeout(() => {
+    state.minPostCount = parseInt(els.minPostFilter.value, 10) || 0;
+    localStorage.setItem('minPostFilter', els.minPostFilter.value);
+    rerenderCurrent();
+  }, 400);
+});
+
+// Search
+els.globalSearch.addEventListener('input', e => {
+  clearTimeout(state.searchDebounce);
+  state.searchDebounce = setTimeout(() => handleSearch(e.target.value), 150);
+});
+els.searchClear.addEventListener('click', () => {
+  els.globalSearch.value = '';
+  els.searchOverlay.classList.add('hidden');
+});
+document.addEventListener('click', e => {
+  if (!els.searchOverlay.contains(e.target) && e.target !== els.globalSearch) {
+    els.searchOverlay.classList.add('hidden');
+  }
+});
+els.globalSearch.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    els.searchOverlay.classList.add('hidden');
+    els.globalSearch.blur();
+  } else if (e.key === 'Enter') {
+    const query = els.globalSearch.value.trim();
+    if (query) {
+      addHistorySearch(query); // ← record search in history
+      els.searchOverlay.classList.add('hidden');
+      els.globalSearch.value = '';
+      els.globalSearch.blur();
+      navigateTo(['__search_query__', query]);
+    }
+  }
+});
+
+// Breadcrumb home
+els.breadcrumbHome.addEventListener('click', () => {
+  state.currentPath = [];
+  document.querySelectorAll('.tree-label.active').forEach(el => el.classList.remove('active'));
+  renderBreadcrumb([]);
+  els.tagListSection.classList.add('hidden');
+  els.welcomeState.classList.remove('hidden');
+});
+
+// Scratchpad actions
+els.scratchpadCopy.addEventListener('click', () => {
+  const val = els.scratchpadInput.value.trim();
+  if (!val) { showToast('⚠️ コピーするタグがありません'); return; }
+  copyToClipboard(val);
+});
+
+els.scratchpadClear.addEventListener('click', () => {
+  els.scratchpadInput.value = '';
+  localStorage.removeItem('scratchpad');
+  showToast('🗑 クリアしました');
+});
+
+// Save scratchpad content (debounced)
+els.scratchpadInput.addEventListener('input', () => {
+  clearTimeout(els.scratchpadInput._saveTimer);
+  els.scratchpadInput._saveTimer = setTimeout(() => {
+    localStorage.setItem('scratchpad', els.scratchpadInput.value);
+  }, 500);
+});
+
+// Keyboard shortcut: / to focus search
+document.addEventListener('keydown', e => {
+  if (e.key === '/' && document.activeElement !== els.globalSearch) {
+    e.preventDefault();
+    els.globalSearch.focus();
+    els.globalSearch.select();
+  }
+});
+
+// Mobile: tap outside wiki preview to close it
+document.addEventListener('click', e => {
+  if (isCoarsePointer() &&
+      wikiPreviewEl.style.display === 'block' &&
+      !wikiPreviewEl.contains(e.target) &&
+      !e.target.closest('.tag-btn')) {
+    hideWikiPreview();
+  }
+});
+
+// ── Wiki Preview Tooltip ──────────────────────────
+const wikiPreviewEl = (() => {
+  const el = document.createElement('div');
+  el.className = 'wiki-preview';
+  document.body.appendChild(el);
+  return el;
+})();
+
+const _wikiInfoCache = new Map();
+
+async function fetchTagWikiInfo(tagName) {
+  if (_wikiInfoCache.has(tagName)) return _wikiInfoCache.get(tagName);
+  try {
+    const res = await fetch(
+      `https://danbooru.donmai.us/wiki_pages/${encodeURIComponent(tagName)}.json`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!res.ok) throw new Error('http ' + res.status);
+    const data = await res.json();
+    const info = {
+      otherNames: Array.isArray(data.other_names) ? data.other_names : [],
+      body: dTextToPlain(data.body || ''),
+    };
+    _wikiInfoCache.set(tagName, info);
+    return info;
+  } catch {
+    _wikiInfoCache.set(tagName, null);
+    return null;
+  }
+}
+
+function dTextToPlain(text) {
+  return text
+    .replace(/\[\[([^\]|]*\|)?([^\]]+)\]\]/g, '$2')
+    .replace(/\{\{([^|}]+)(?:\|[^}]*)?\}\}/g, '$1')
+    .replace(/\[(?:b|i|s|u|tn|spoiler)\](.*?)\[\/(?:b|i|s|u|tn|spoiler)\]/gs, '$1')
+    .replace(/\[url=[^\]]+\](.*?)\[\/url\]/gs, '$1')
+    .replace(/\[(?:table|thead|tbody|tr|th|td)[^\]]*\](.*?)\[\/(?:table|thead|tbody|tr|th|td)\]/gs, '$1')
+    .replace(/h[1-6]\.\s*/g, '')
+    .replace(/^\*+\s*/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// Returns true when the primary pointer is coarse (touch screen)
+function isCoarsePointer() {
+  return window.matchMedia('(pointer: coarse)').matches;
+}
+
+function openWikiLink(tag) {
+  const tagUrl = tag.url || `/wiki_pages/${tag.name}`;
+  const url = tagUrl.startsWith('http') ? tagUrl : `https://danbooru.donmai.us${tagUrl}`;
+  window.open(url, '_blank');
+}
+
+function showWikiPreview(e, tag, meta) {
+  const catColors = {
+    0: 'var(--cat-0)', 1: 'var(--cat-1)', 3: 'var(--cat-3)',
+    4: 'var(--cat-4)', 5: 'var(--cat-5)'
+  };
+  const color = catColors[meta?.category] ?? 'var(--cat-x)';
+  const mobile = isCoarsePointer();
+
+  // Build initial content with DOM nodes (so mobile hint stays last)
+  wikiPreviewEl.innerHTML = '';
+
+  const nameEl = document.createElement('div');
+  nameEl.className = 'wiki-preview-name';
+  nameEl.style.color = color;
+  nameEl.textContent = tag.name;
+  wikiPreviewEl.appendChild(nameEl);
+
+  const loadingEl = document.createElement('div');
+  loadingEl.className = 'wiki-preview-loading';
+  loadingEl.textContent = '…';
+  wikiPreviewEl.appendChild(loadingEl);
+
+  // Mobile hint: shown at bottom, persists after async content loads
+  if (mobile) {
+    const hintEl = document.createElement('div');
+    hintEl.className = 'wiki-preview-mobile-hint';
+    hintEl.textContent = '↗ 再タップで移動 ';
+    wikiPreviewEl.appendChild(hintEl);
+  }
+
+  repositionWikiPreview(e);
+  wikiPreviewEl.style.display = 'block';
+
+  fetchTagWikiInfo(tag.name).then(info => {
+    if (wikiPreviewEl.style.display !== 'block') return;
+    const loading = wikiPreviewEl.querySelector('.wiki-preview-loading');
+    if (loading) loading.remove();
+    if (!info) return;
+
+    // Insert content BEFORE the mobile hint so it stays at the bottom
+    const hint = wikiPreviewEl.querySelector('.wiki-preview-mobile-hint');
+
+    if (info.otherNames.length > 0) {
+      const el = document.createElement('div');
+      el.className = 'wiki-preview-aliases';
+      el.textContent = info.otherNames.slice(0, 8).join(' / ');
+      hint ? wikiPreviewEl.insertBefore(el, hint) : wikiPreviewEl.appendChild(el);
+    }
+
+    if (info.body) {
+      let body = info.body;
+      if (body.length > 240) {
+        const cut = body.lastIndexOf('.', 240);
+        body = cut > 60 ? body.slice(0, cut + 1) : body.slice(0, 240) + '…';
+      }
+      const el = document.createElement('div');
+      el.className = 'wiki-preview-body';
+      el.textContent = body;
+      hint ? wikiPreviewEl.insertBefore(el, hint) : wikiPreviewEl.appendChild(el);
+    }
+  });
+}
+
+function repositionWikiPreview(e) {
+  if (isCoarsePointer()) {
+    // Mobile: center horizontally, fixed near top
+    const w = Math.min(300, window.innerWidth - 32);
+    wikiPreviewEl.style.width = w + 'px';
+    wikiPreviewEl.style.left = ((window.innerWidth - w) / 2) + 'px';
+    wikiPreviewEl.style.top  = '72px'; // just below header
+  } else {
+    const x = Math.min(e.clientX + 14, window.innerWidth  - 340);
+    const y = Math.min(e.clientY + 14, window.innerHeight - 260);
+    wikiPreviewEl.style.left = x + 'px';
+    wikiPreviewEl.style.top  = y + 'px';
+    wikiPreviewEl.style.width = '';
+  }
+}
+
+function hideWikiPreview() {
+  wikiPreviewEl.style.display = 'none';
+  wikiPreviewEl._activeTag = null;
+}
+
+// ── Highlight CSS ────────────────────────────────
+const highlightStyle = document.createElement('style');
+highlightStyle.textContent = `
+  .tag-card.highlight {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px var(--accent-glow) !important;
+  }
+  .search-result-count {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-dim);
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+`;
+document.head.appendChild(highlightStyle);
+
+// ── Init ─────────────────────────────────────────
+initResizer();
+initMobileSidebar();
+initScratchpadToggle();
+boot();

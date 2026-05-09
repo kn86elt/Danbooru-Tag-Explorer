@@ -1,0 +1,30 @@
+# -- Downloaded / generated data (large or user-specific) -------------------
+data/danbooru.csv
+data/ja.csv
+data/settings.json
+
+# -- Intermediate build / test artifacts -------------------------------------
+data/*.bak
+data/*.broken.json
+data/*.test.json
+data/*.fixed.json
+data/*_report.json
+data/*_report*.json
+
+# -- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.uv/
+
+# -- Editor backups ----------------------------------------------------------
+*~
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# -- Logs --------------------------------------------------------------------
+*.log
