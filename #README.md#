@@ -82,6 +82,7 @@ danbooru_tag_explorer/
 ```
 
 danbooru.csv / ja.csv は互換性のある他のデータと差し替え可能です。
+
 データを直接差し替えるか、settings.json の  "tagCsv" "jaCsv" のファイルパスを書き換えてください。"_notes"以下はデフォルトパスを記載したコメントですので編集不要です。
 以下のデータが流用できる事を確認しています。
 
