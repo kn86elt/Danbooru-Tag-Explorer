@@ -146,10 +146,11 @@ function savePins() {
 }
 
 // Called once at boot start: loads server-side settings (CSV paths, favs, pins).
-// Returns { tagCsv, jaCsv } using server values when available, else defaults.
+// Returns { tagCsv, jaCsv, _mode } using server values when available, else defaults.
+// _mode === 'a1111' の場合、CSVは専用エンドポイント (api/csv/*) 経由で取得する。
 // If the API is unavailable (non-Flask server), silently keeps localStorage values.
 async function loadServerSettings() {
-  const defaults = { tagCsv: 'data/danbooru.csv', jaCsv: 'data/ja.csv' };
+  const defaults = { tagCsv: 'data/danbooru.csv', jaCsv: 'data/ja.csv', _mode: null };
   try {
     const res = await fetch('api/settings', { signal: AbortSignal.timeout(2000) });
     if (!res.ok) return defaults;
@@ -165,6 +166,7 @@ async function loadServerSettings() {
     return {
       tagCsv: (typeof data.tagCsv === 'string' && data.tagCsv) ? data.tagCsv : defaults.tagCsv,
       jaCsv:  (typeof data.jaCsv  === 'string' && data.jaCsv)  ? data.jaCsv  : defaults.jaCsv,
+      _mode:  data._mode ?? null,
     };
   } catch (_e) {
     return defaults;
@@ -317,15 +319,21 @@ async function boot() {
   try {
     // Step 1: fetch server settings first to resolve CSV paths + favs/pins
     updateLoadingText('設定を読み込み中…');
-    const { tagCsv, jaCsv } = await loadServerSettings();
-    const csvName = tagCsv.split('/').pop();
+    const { tagCsv, jaCsv, _mode } = await loadServerSettings();
+
+    // A1111モードでは専用エンドポイント経由でCSVを取得する。
+    // これにより shared.opts で設定された絶対パスや BASE_DIR 外のファイルも配信できる。
+    // スタンドアロンモード (_mode === null) では従来通り相対パスで直接 fetch する。
+    const tagCsvUrl = _mode === 'a1111' ? 'api/csv/danbooru' : './' + tagCsv;
+    const jaCsvUrl  = _mode === 'a1111' ? 'api/csv/ja'       : './' + jaCsv;
+    const csvName   = _mode === 'a1111' ? 'danbooru.csv'     : tagCsv.split('/').pop();
 
     // Step 2: fetch data files using configured paths
     updateLoadingText(`タグメタデータを読み込み中… (${csvName})`);
     const [treeRes, csvRes, jaRes] = await Promise.all([
       fetch('./data/tag_tree.json'),
-      fetch('./' + tagCsv),
-      fetch('./' + jaCsv).catch(() => null)
+      fetch(tagCsvUrl),
+      fetch(jaCsvUrl).catch(() => null)
     ]);
     if (!treeRes.ok) throw new Error(`tag_tree.json: HTTP ${treeRes.status}`);
     if (!csvRes.ok)  throw new Error(`${csvName}: HTTP ${csvRes.status}`);

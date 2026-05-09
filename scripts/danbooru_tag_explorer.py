@@ -8,9 +8,18 @@ and restart the WebUI. A "Tag Explorer" tab will appear.
 Standalone operation (server.py / run.bat) is not affected.
 
 [danbooru.csv resolution order]
-  1. data/danbooru.csv inside this extension folder -> use it
-  2. a1111-sd-webui-tagcomplete installed and has CSV -> borrow it
-  3. Neither found -> 404 (run standalone once, or install tagcomplete)
+  1. A1111 Settings (Settings > Danbooru Tag Explorer) で指定されたパス
+  2. data/danbooru.csv inside this extension folder -> use it
+  3. a1111-sd-webui-tagcomplete installed and has CSV -> borrow it
+  4. Neither found -> 404 (run standalone once, or install tagcomplete)
+
+[ja.csv resolution order]
+  1. A1111 Settings (Settings > Danbooru Tag Explorer) で指定されたパス
+  2. data/ja.csv inside this extension folder -> use it
+  3. Neither found -> 日本語訳なしで起動
+
+A1111モードでは CSV は専用エンドポイント (/api/csv/danbooru, /api/csv/ja) 経由で
+配信する。settings.json の tagCsv / jaCsv フィールドはフロントエンドから無視される。
 """
 
 import json
@@ -49,11 +58,43 @@ def find_tagcomplete_csv():
     return None
 
 
+def _get_shared_opt(name: str) -> str:
+    """A1111 の shared.opts から設定値を取得する。利用不可の場合は空文字を返す。"""
+    try:
+        from modules import shared  # type: ignore
+        return (getattr(shared.opts, name, None) or "").strip()
+    except Exception:
+        return ""
+
+
 def resolve_danbooru_csv():
+    """danbooru.csv のパスを解決する。shared.opts -> ローカル -> tagcomplete の順で探す。"""
+    custom = _get_shared_opt("dte_tag_csv")
+    if custom:
+        p = Path(custom)
+        if not p.is_absolute():
+            p = BASE_DIR / p
+        if p.is_file():
+            return p.resolve()
     local = DATA_DIR / "danbooru.csv"
     if local.is_file():
         return local
     return find_tagcomplete_csv()
+
+
+def resolve_ja_csv():
+    """ja.csv のパスを解決する。shared.opts -> ローカルの順で探す。"""
+    custom = _get_shared_opt("dte_ja_csv")
+    if custom:
+        p = Path(custom)
+        if not p.is_absolute():
+            p = BASE_DIR / p
+        if p.is_file():
+            return p.resolve()
+    local = DATA_DIR / "ja.csv"
+    if local.is_file():
+        return local
+    return None
 
 
 # ---- Settings helpers -------------------------------------------------------
@@ -63,8 +104,8 @@ _DEFAULTS = {
     "tagCsv":     "data/danbooru.csv",
     "jaCsv":      "data/ja.csv",
     "_notes": {
-        "tagCsv": "Tag metadata CSV (default: data/danbooru.csv)",
-        "jaCsv":  "Japanese translation CSV (default: data/ja.csv)",
+        "tagCsv": "Tag metadata CSV (default: data/danbooru.csv) -- A1111モードでは無視される",
+        "jaCsv":  "Japanese translation CSV (default: data/ja.csv) -- A1111モードでは無視される",
     },
 }
 
@@ -116,10 +157,20 @@ def on_app_started(demo, app):
                 "[Danbooru Tag Explorer] danbooru.csv not found. "
                 "Run standalone (run.bat) once to download it, or install tagcomplete."
             )
+        elif _get_shared_opt("dte_tag_csv"):
+            print("[Danbooru Tag Explorer] danbooru.csv: A1111 Settings で指定 (" + str(csv_path) + ")")
         elif (DATA_DIR / "danbooru.csv").is_file():
             print("[Danbooru Tag Explorer] danbooru.csv: local copy (" + str(csv_path) + ")")
         else:
             print("[Danbooru Tag Explorer] danbooru.csv: from tagcomplete (" + str(csv_path) + ")")
+
+        ja_path = resolve_ja_csv()
+        if ja_path is None:
+            print("[Danbooru Tag Explorer] ja.csv not found (日本語訳なしで起動します)")
+        elif _get_shared_opt("dte_ja_csv"):
+            print("[Danbooru Tag Explorer] ja.csv: A1111 Settings で指定 (" + str(ja_path) + ")")
+        else:
+            print("[Danbooru Tag Explorer] ja.csv: " + str(ja_path))
 
         @app.get(ROUTE_PREFIX + "/")
         def dte_index():
@@ -134,15 +185,35 @@ def on_app_started(demo, app):
         @app.get(ROUTE_PREFIX + "/api/settings")
         def dte_get_settings():
             s = load_settings()
-            s["tagCsv"] = "data/danbooru.csv"
+            # A1111モードではCSVは専用エンドポイント(/api/csv/*)で配信するため
+            # settings.json の tagCsv / jaCsv はフロントエンドから無視される。
+            s["_mode"] = "a1111"
             actual = resolve_danbooru_csv()
             if actual is None:
                 s["_info"] = {"csvSource": "missing"}
+            elif _get_shared_opt("dte_tag_csv"):
+                s["_info"] = {"csvSource": "custom", "csvPath": str(actual)}
             elif (DATA_DIR / "danbooru.csv").is_file():
                 s["_info"] = {"csvSource": "local"}
             else:
                 s["_info"] = {"csvSource": "tagcomplete", "csvPath": str(actual)}
             return JSONResponse(s)
+
+        @app.get(ROUTE_PREFIX + "/api/csv/danbooru")
+        def dte_csv_danbooru():
+            """danbooru.csv を配信する。shared.opts -> ローカル -> tagcomplete の順で解決。"""
+            path = resolve_danbooru_csv()
+            if path is None:
+                return JSONResponse({"error": "danbooru.csv not found"}, status_code=404)
+            return FileResponse(str(path), media_type="text/plain; charset=utf-8")
+
+        @app.get(ROUTE_PREFIX + "/api/csv/ja")
+        def dte_csv_ja():
+            """ja.csv を配信する。shared.opts -> ローカルの順で解決。"""
+            path = resolve_ja_csv()
+            if path is None:
+                return JSONResponse({"error": "ja.csv not found"}, status_code=404)
+            return FileResponse(str(path), media_type="text/plain; charset=utf-8")
 
         @app.get(ROUTE_PREFIX + "/api/favorites")
         def dte_get_favorites():
@@ -185,10 +256,6 @@ def on_app_started(demo, app):
                 return JSONResponse({"error": "not found"}, status_code=404)
             if target.is_file():
                 return FileResponse(str(target))
-            if path == "data/danbooru.csv":
-                tc_csv = find_tagcomplete_csv()
-                if tc_csv is not None:
-                    return FileResponse(str(tc_csv))
             return JSONResponse({"error": "not found"}, status_code=404)
 
     except Exception:
@@ -198,26 +265,12 @@ def on_app_started(demo, app):
 
 # ---- Gradio tab HTML --------------------------------------------------------
 def _build_ui_html():
-    # Height strategy
-    # -----------------------------------------------------------------------
-    # Gradio tab panels use height:auto, so any child measurement-based approach
-    # creates a circular dependency (panel height = iframe height = 0).
-    # getBoundingClientRect() on #dte-wrap consistently returns all-zeros.
+    # iframe height: use calc(100vh - OFFSET) to fill the visible tab area.
+    # Gradio tab panels use height:auto so measurement-based approaches fail.
+    # OFFSET covers browser chrome + A1111 top bar + tab row (~220px total).
     #
-    # Fix: use calc(100vh - OFFSET) in CSS. Viewport units are independent of
-    # the parent chain, so this always fills the visible tab area correctly.
-    # OFFSET covers browser chrome (~60px) + A1111 top bar + tab row (~160px).
-    #
-    # Scroll focus strategy
-    # -----------------------------------------------------------------------
-    # Once an iframe receives a wheel event, its contentWindow holds scroll focus
-    # until explicitly released. Tab-switch detection via MutationObserver proved
-    # unreliable (Gradio's panel attributes may not change in an observable way).
-    #
-    # Fix: listen for mouseleave on #dte-wrap. The moment the cursor moves to
-    # another tab or elsewhere on the page, blur the iframe's contentWindow and
-    # focus the parent window. Simple and reliable.
-
+    # Scroll focus: listen for mouseleave on the wrapper div to release scroll
+    # focus from the iframe contentWindow back to the parent window.
     prefix = ROUTE_PREFIX
     IFRAME_OFFSET = 220  # px; tune if the iframe is too tall or too short
 
@@ -238,8 +291,6 @@ def _build_ui_html():
         "  var wrap  = document.getElementById('dte-wrap');\n"
         "  var frame = document.getElementById('dte-frame');\n"
         "  if (!wrap || !frame) return;\n"
-        "\n"
-        "  // Release scroll focus the moment the cursor leaves the iframe area\n"
         "  wrap.addEventListener('mouseleave', function () {\n"
         "    try { frame.contentWindow.blur(); } catch (e) {}\n"
         "    try { window.focus(); } catch (e) {}\n"
@@ -262,11 +313,38 @@ def on_ui_tabs():
         return []
 
 
+# ---- A1111 Settings ---------------------------------------------------------
+def on_ui_settings():
+    try:
+        from modules import shared  # type: ignore
+        section = ("danbooru_tag_explorer", "Danbooru Tag Explorer")
+        shared.opts.add_option(
+            "dte_tag_csv",
+            shared.OptionInfo(
+                "",
+                "タグCSVファイルパス（絶対パスまたは相対パス。空欄 = 自動検出: data/danbooru.csv -> tagcomplete）",
+                section=section,
+            ),
+        )
+        shared.opts.add_option(
+            "dte_ja_csv",
+            shared.OptionInfo(
+                "",
+                "日本語訳CSVファイルパス（絶対パスまたは相対パス。空欄 = data/ja.csv）",
+                section=section,
+            ),
+        )
+    except Exception:
+        print("[Danbooru Tag Explorer] on_ui_settings error:")
+        traceback.print_exc()
+
+
 # ---- Register callbacks -----------------------------------------------------
 try:
     from modules import script_callbacks  # type: ignore
     script_callbacks.on_app_started(on_app_started)
     script_callbacks.on_ui_tabs(on_ui_tabs)
+    script_callbacks.on_ui_settings(on_ui_settings)
 except ImportError:
     pass  # Outside A1111 -- silently skip
 except Exception:

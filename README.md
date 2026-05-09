@@ -61,6 +61,50 @@ chmod +x run.sh
 
 サーバーを停止するには Ctrl+C を押すか、起動したウィンドウを閉じてください。
 
+## Stable Diffusion WebUI (A1111 / reForge) 拡張としてインストールする
+
+### インストール手順
+
+WebUI の **Extensions** タブ → **Install from URL** に次の URL を入力してインストールします。
+
+```
+https://github.com/<your-repo>/danbooru_tag_explorer
+```
+
+または `extensions/` フォルダに本リポジトリをフォルダごと配置してください。
+
+```
+stable-diffusion-webui/
+└── extensions/
+    └── danbooru_tag_explorer/   ← このフォルダを置く
+        ├── scripts/
+        │   └── danbooru_tag_explorer.py
+        ├── index.html
+        ├── app.js
+        └── ...
+```
+
+WebUI を再起動すると **DanbooruTagExplorer** タブが追加されます。
+
+### danbooru.csv の準備
+
+拡張モードでは起動スクリプト（`run.bat`）が実行されないため、`danbooru.csv` は次のいずれかの方法で用意してください。
+
+1. **[a1111-sd-webui-tagcomplete](https://github.com/DominikDoom/a1111-sd-webui-tagcomplete) を導入済みの場合**、そのCSVを自動で借用します。追加作業は不要です。
+2. **スタンドアロンモードで一度起動する**（`run.bat` / `run.sh`）と `data/danbooru.csv` が自動取得されます。その後 WebUI を再起動してください。
+3. **手動配置**: 互換CSVを `data/danbooru.csv` としてコピーしてください。
+
+### タグ・翻訳ファイルのパスを変更する
+
+WebUI の **Settings** → **Danbooru Tag Explorer** セクションで設定できます。
+
+| 項目 | 説明 |
+|------|------|
+| タグCSVファイルパス | 空欄 = 自動検出（上記の順序）。絶対パスまたは相対パス（拡張フォルダ `danbooru_tag_explorer/` 基準）で指定。 |
+| 日本語訳CSVファイルパス | 空欄 = `data/ja.csv`。絶対パスまたは相対パス（拡張フォルダ基準）で指定。 |
+
+設定変更後は **DanbooruTagExplorer** タブをリロード（ブラウザの更新ボタン）してください。WebUI の再起動は不要です。
+
 ## ファイル構成
 
 ```
@@ -82,7 +126,7 @@ danbooru_tag_explorer/
 ```
 
 danbooru.csv / ja.csv は互換性のある他のデータと差し替え可能です。
-データを直接差し替えるか、settings.json の  "tagCsv" "jaCsv" のファイルパスを書き換えてください。"_notes"以下はデフォルトパスを記載したコメントですので編集不要です。
+データを直接差し替えるか、`settings.json` の `"tagCsv"` `"jaCsv"` のファイルパスを書き換えてください（スタンドアロンモードのみ有効。A1111拡張モードでは Settings タブから設定してください）。`"_notes"` 以下はデフォルトパスを記載したコメントですので編集不要です。
 以下のデータが流用できる事を確認しています。
 
 - [CIVITAI:tagcomplete用辞書&日本語翻訳辞書 / asugonomi](https://civitai.com/models/2018479/danbooru-tag-complete-csv-tagcompleteand?modelVersionId=2284461)
