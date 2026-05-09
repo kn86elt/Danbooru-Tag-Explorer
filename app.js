@@ -129,7 +129,7 @@ const state = {
 function saveFavs() {
   const arr = Array.from(state.favTags);
   localStorage.setItem('favTags', JSON.stringify(arr));
-  fetch('/api/favorites', {
+  fetch('api/favorites', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(arr),
@@ -138,19 +138,21 @@ function saveFavs() {
 
 function savePins() {
   localStorage.setItem('pinnedCats', JSON.stringify(state.pinnedCats));
-  fetch('/api/pins', {
+  fetch('api/pins', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(state.pinnedCats),
   }).catch(() => {}); // ignore if static server
 }
 
-// Called once on boot: loads server-side favs/pins (shared across devices).
+// Called once at boot start: loads server-side settings (CSV paths, favs, pins).
+// Returns { tagCsv, jaCsv } using server values when available, else defaults.
 // If the API is unavailable (non-Flask server), silently keeps localStorage values.
 async function loadServerSettings() {
+  const defaults = { tagCsv: 'data/danbooru.csv', jaCsv: 'data/ja.csv' };
   try {
-    const res = await fetch('/api/settings', { signal: AbortSignal.timeout(2000) });
-    if (!res.ok) return;
+    const res = await fetch('api/settings', { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) return defaults;
     const data = await res.json();
     if (Array.isArray(data.favTags)) {
       state.favTags = new Set(data.favTags);
@@ -160,8 +162,12 @@ async function loadServerSettings() {
       state.pinnedCats = data.pinnedCats;
       localStorage.setItem('pinnedCats', JSON.stringify(state.pinnedCats));
     }
+    return {
+      tagCsv: (typeof data.tagCsv === 'string' && data.tagCsv) ? data.tagCsv : defaults.tagCsv,
+      jaCsv:  (typeof data.jaCsv  === 'string' && data.jaCsv)  ? data.jaCsv  : defaults.jaCsv,
+    };
   } catch (_e) {
-    // Static server or network error — stay with localStorage values
+    return defaults;
   }
 }
 
@@ -309,14 +315,20 @@ const els = {
 // ── Boot ────────────────────────────────────────
 async function boot() {
   try {
-    updateLoadingText('タグメタデータを読み込み中… (danbooru.csv)');
+    // Step 1: fetch server settings first to resolve CSV paths + favs/pins
+    updateLoadingText('設定を読み込み中…');
+    const { tagCsv, jaCsv } = await loadServerSettings();
+    const csvName = tagCsv.split('/').pop();
+
+    // Step 2: fetch data files using configured paths
+    updateLoadingText(`タグメタデータを読み込み中… (${csvName})`);
     const [treeRes, csvRes, jaRes] = await Promise.all([
       fetch('./data/tag_tree.json'),
-      fetch('./data/danbooru.csv'),
-      fetch('./data/ja.csv').catch(() => null)
+      fetch('./' + tagCsv),
+      fetch('./' + jaCsv).catch(() => null)
     ]);
     if (!treeRes.ok) throw new Error(`tag_tree.json: HTTP ${treeRes.status}`);
-    if (!csvRes.ok)  throw new Error(`danbooru.csv: HTTP ${csvRes.status}`);
+    if (!csvRes.ok)  throw new Error(`${csvName}: HTTP ${csvRes.status}`);
 
     updateLoadingText('JSONを解析中…');
     state.tree = await treeRes.json();
@@ -338,9 +350,6 @@ async function boot() {
     updateLoadingText('インデックスを構築中…');
     await nextFrame();
     buildFlatIndex(state.tree, []);
-
-    updateLoadingText('設定を読み込み中…');
-    await loadServerSettings();
 
     updateLoadingText('ツリーを描画中…');
     await nextFrame();

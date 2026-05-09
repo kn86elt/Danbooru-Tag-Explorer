@@ -13,7 +13,7 @@ The output shape is compatible with the existing app:
       }
     }
 
-This script intentionally does not edit app.js, index.html, or style.css.
+This script intentionally does not edit app.js, index.html, or dte_app.css.
 By default it writes data/tag_tree.generated.json so the generated dataset can
 be inspected before replacing data/tag_tree.json.
 """

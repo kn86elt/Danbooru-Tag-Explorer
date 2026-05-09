@@ -44,13 +44,31 @@ def get_local_ip() -> str:
 
 
 # ── Settings helpers ──────────────────────────────────────────────────────────
+
+# Default values injected into every settings response.
+# _notes is always overwritten with canonical text (never user-edited).
+_DEFAULTS: dict = {
+    "favTags":    [],
+    "pinnedCats": [],
+    "tagCsv":     "data/danbooru.csv",
+    "jaCsv":      "data/ja.csv",
+    "_notes": {
+        "tagCsv": "タグメタデータCSV (デフォルト: data/danbooru.csv)",
+        "jaCsv":  "日本語訳CSV  (デフォルト: data/ja.csv)",
+    },
+}
+
+
 def load_settings() -> dict:
+    result = {k: v for k, v in _DEFAULTS.items()}  # shallow copy of defaults
     if SETTINGS_FILE.exists():
         try:
-            return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            saved = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            # Merge saved values; _notes is always reset to canonical defaults
+            result.update({k: v for k, v in saved.items() if k != "_notes"})
         except Exception:
             pass
-    return {"favTags": [], "pinnedCats": []}
+    return result
 
 
 def save_settings(data: dict):
@@ -117,6 +135,8 @@ def api_set_pins():
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    # Migrate settings.json: inject new keys (tagCsv, jaCsv, _notes) if missing.
+    save_settings(load_settings())
     local_ip = get_local_ip()
     local_url = f"http://localhost:{PORT}/"
     lan_url   = f"http://{local_ip}:{PORT}/"

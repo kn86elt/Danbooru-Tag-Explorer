@@ -67,7 +67,7 @@ chmod +x run.sh
 danbooru_tag_explorer/
 ├── index.html          # アプリ本体 (HTML)
 ├── app.js              # アプリ本体 (JavaScript)
-├── style.css           # スタイルシート
+├── dte_app.css         # スタイルシート
 ├── server.py           # Flask サーバー (静的配信 + API)
 ├── run.bat             # Windows 用起動スクリプト
 ├── run.sh              # macOS / Linux 用起動スクリプト（未検証）
@@ -80,6 +80,12 @@ danbooru_tag_explorer/
     ├── ja.csv              # 日本語翻訳データ (generate_ja.py で生成)
     └── settings.json       # お気に入り・ピン止め (サーバー側保存、自動生成)
 ```
+
+danbooru.csv / ja.csv は互換性のある他のデータと差し替え可能です。
+データを直接差し替えるか、settings.json の  "tagCsv" "jaCsv" のファイルパスを書き換えてください。"_notes"以下はデフォルトパスを記載したコメントですので編集不要です。
+以下のデータが流用できる事を確認しています。
+
+- [CIVITAI:tagcomplete用辞書&日本語翻訳辞書 / asugonomi](https://civitai.com/models/2018479/danbooru-tag-complete-csv-tagcompleteand?modelVersionId=2284461)
 
 ## データの永続化
 
