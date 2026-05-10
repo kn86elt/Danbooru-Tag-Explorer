@@ -312,6 +312,8 @@ const els = {
   themeToggle:     $('theme-toggle'),
   mobileMenuBtn:   $('mobile-menu-btn'),
   sidebarCloseBtn: $('sidebar-close-btn'),
+  cardSizeWrap:    $('card-size-wrap'),
+  cardSizeSlider:  $('card-size-slider'),
 };
 
 // ── Boot ────────────────────────────────────────
@@ -1739,17 +1741,52 @@ els.filterClearBtn.addEventListener('click', () => {
 });
 
 // View mode toggle
+const CARD_SIZE_CLASSES = ['card-size-s', 'card-size-m', 'card-size-l'];
+
+function applyCardSize(value) {
+  const idx = Number(value);
+  CARD_SIZE_CLASSES.forEach((cls, i) => {
+    els.tagsGrid.classList.toggle(cls, i === idx);
+  });
+}
+
+function syncCardSizeWrap(mode) {
+  if (els.cardSizeWrap) {
+    els.cardSizeWrap.classList.toggle('hidden', mode === 'list');
+  }
+}
+
 const viewMode = localStorage.getItem('viewMode') || 'list';
 els.viewModeSelect.value = viewMode;
-if (viewMode === 'list') els.tagsGrid.classList.add('list-view');
-else els.tagsGrid.classList.remove('list-view');
+if (viewMode === 'list') {
+  els.tagsGrid.classList.add('list-view');
+} else {
+  els.tagsGrid.classList.remove('list-view');
+}
+syncCardSizeWrap(viewMode);
+
+// Card size slider init
+const savedCardSize = localStorage.getItem('cardSize') ?? '1';
+if (els.cardSizeSlider) {
+  els.cardSizeSlider.value = savedCardSize;
+}
+applyCardSize(savedCardSize);
 
 els.viewModeSelect.addEventListener('change', e => {
   const mode = e.target.value;
   localStorage.setItem('viewMode', mode);
   if (mode === 'list') els.tagsGrid.classList.add('list-view');
   else els.tagsGrid.classList.remove('list-view');
+  syncCardSizeWrap(mode);
 });
+
+if (els.cardSizeSlider) {
+  els.cardSizeSlider.addEventListener('input', e => {
+    const val = e.target.value;
+    localStorage.setItem('cardSize', val);
+    applyCardSize(val);
+  });
+}
 
 // Scratchpad Settings
 if (els.replaceUnderscore) {

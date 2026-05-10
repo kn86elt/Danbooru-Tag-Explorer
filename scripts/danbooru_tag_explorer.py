@@ -23,6 +23,7 @@ A1111モードでは CSV は専用エンドポイント (/api/csv/danbooru, /api
 """
 
 import json
+import re
 import traceback
 from pathlib import Path
 
@@ -130,8 +131,25 @@ def save_settings(data):
 
 
 # ---- index.html with A1111 patches -----------------------------------------
+def _file_version(filename: str) -> str:
+    """ファイルの mtime を整数文字列で返す。ファイルが存在しない場合は '0'。"""
+    p = BASE_DIR / filename
+    return str(int(p.stat().st_mtime)) if p.is_file() else "0"
+
+
 def build_index_html():
     html = (BASE_DIR / "index.html").read_text(encoding="utf-8")
+
+    # CSS / JS の URL にファイル mtime をクエリとして付加する（キャッシュバスティング）。
+    # ファイルが更新されると URL が変わり、ブラウザは必ず新しいファイルを取得する。
+    def versioned(match: re.Match) -> str:
+        attr, filename = match.group(1), match.group(2)
+        ver = _file_version(filename)
+        return f'{attr}="{filename}?v={ver}"'
+
+    html = re.sub(r'(href)="([\w./][\w./]*\.css)"',  versioned, html)
+    html = re.sub(r'(src)="([\w./][\w./]*\.js)"',    versioned, html)
+
     injection = (
         '  <base href="' + ROUTE_PREFIX + '/">\n'
         "  <script>\n"
@@ -255,7 +273,12 @@ def on_app_started(demo, app):
             if not target.is_relative_to(BASE_DIR):
                 return JSONResponse({"error": "not found"}, status_code=404)
             if target.is_file():
-                return FileResponse(str(target))
+                resp = FileResponse(str(target))
+                # JS/CSS はブラウザにキャッシュさせない。
+                # これにより A1111 再起動後に必ず最新ファイルが読み込まれる。
+                if path.endswith((".js", ".css")):
+                    resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+                return resp
             return JSONResponse({"error": "not found"}, status_code=404)
 
     except Exception:

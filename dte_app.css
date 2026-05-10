@@ -701,6 +701,52 @@ body {
 }
 .toggle-label input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; }
 
+/* ── Card size slider ─────────────────────────── */
+.card-size-wrap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.card-size-s-label,
+.card-size-l-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: var(--font-sans);
+  user-select: none;
+  line-height: 1;
+}
+.card-size-l-label { font-size: 13px; }
+.card-size-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 64px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  outline: none;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.card-size-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  transition: transform var(--t-fast);
+}
+.card-size-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: none;
+}
+.card-size-slider:hover::-webkit-slider-thumb { transform: scale(1.2); }
+
 /* ── Filter menu ──────────────────────────────── */
 .filter-menu-wrap { position: relative; }
 
@@ -846,10 +892,15 @@ body {
   overflow-y: auto;
   padding: 16px 20px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min-w, 220px), 1fr));
   gap: 8px;
   align-content: start;
 }
+/* Card size presets — S: 140px / M(default): 220px / L: 320px */
+.tags-grid.card-size-s { --card-min-w: 140px; }
+.tags-grid.card-size-m { --card-min-w: 220px; }
+.tags-grid.card-size-l { --card-min-w: 320px; }
+
 .tags-grid.list-view {
   grid-template-columns: 1fr;
   gap: 4px;
@@ -923,6 +974,61 @@ body {
   z-index: 2;
   flex: 1;
   min-width: 0; /* required for text-overflow in Firefox flex children */
+}
+
+/* ── Card size: S ── 小フォント・1行、アクション非表示で名前を全幅に */
+.tags-grid.card-size-s:not(.list-view) .tag-name {
+  font-size: 11px;
+}
+.tags-grid.card-size-s:not(.list-view) .tag-card {
+  padding: 7px 9px;
+  min-height: 34px;
+}
+/* S サイズ: アクションを absolute でフロー外へ → tag-name が全幅を使える */
+/* flex から外れるので tag-name の幅を圧迫しない                          */
+.tags-grid.card-size-s:not(.list-view) .tag-actions {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  /* opacity: 0 は .tag-actions 基底スタイルから引き継ぐ */
+}
+/* ホバー時: 半透明で重ねて表示（テキストが透けて読める）                 */
+/* 詳細度が .tag-card:hover .tag-actions より高いので基底の opacity:1 に勝つ */
+.tags-grid.card-size-s:not(.list-view) .tag-card:hover .tag-actions {
+  opacity: 0.75;
+}
+/* 参照数は背景ウォーターマークとしてやや濃く・縦方向に中央寄せ */
+.tags-grid.card-size-s:not(.list-view) .tag-post-count {
+  font-size: 18px;
+  bottom: 50%;
+  transform: translateY(50%);
+  opacity: 0.13;
+  right: 6px;
+}
+
+/* ── Card size: L ── 大フォント・2行クランプ・日本語表示 */
+.tags-grid.card-size-l:not(.list-view) .tag-name {
+  font-size: 13.5px;
+  white-space: normal;
+  overflow: hidden;
+  text-overflow: clip;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-all;
+  line-height: 1.5;
+}
+.tags-grid.card-size-l:not(.list-view) .tag-card {
+  align-items: flex-start;
+  padding: 12px 14px;
+  min-height: 56px;
+}
+/* Lサイズでは日本語訳を表示 */
+.tags-grid.card-size-l:not(.list-view) .tag-ja {
+  display: inline;
+  font-size: 10px;
+  opacity: 0.8;
 }
 
 .tag-word-link {
