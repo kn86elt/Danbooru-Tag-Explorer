@@ -309,11 +309,26 @@ const els = {
   scratchpadClear: $('scratchpad-clear'),
   scratchpadToggle:$('scratchpad-toggle'),
   replaceUnderscore:$('replace-underscore'),
+  appendComma:     $('append-comma'),
   themeToggle:     $('theme-toggle'),
   mobileMenuBtn:   $('mobile-menu-btn'),
   sidebarCloseBtn: $('sidebar-close-btn'),
-  cardSizeWrap:    $('card-size-wrap'),
-  cardSizeSlider:  $('card-size-slider'),
+  cardSizeWrap:       $('card-size-wrap'),
+  cardSizeSlider:     $('card-size-slider'),
+  searchEnterHint:    $('search-enter-hint'),
+  cardContextMenu:    $('card-context-menu'),
+  ctxDanbooruPosts:   $('ctx-danbooru-posts'),
+  ctxDetail:          $('ctx-detail'),
+  tagDetailOverlay:   $('tag-detail-overlay'),
+  detailTagName:      $('detail-tag-name'),
+  detailTagJa:        $('detail-tag-ja'),
+  detailBreadcrumb:   $('detail-breadcrumb'),
+  detailPostCount:    $('detail-post-count'),
+  detailWikiBody:     $('detail-wiki-body'),
+  detailWikiBtn:      $('detail-wiki-btn'),
+  detailFavBtn:       $('detail-fav-btn'),
+  detailCopyBtn:      $('detail-copy-btn'),
+  detailCloseBtn:     $('detail-close-btn'),
 };
 
 // ── Boot ────────────────────────────────────────
@@ -909,8 +924,17 @@ function navigateTo(path) {
 
     const activeNode = findTreeNode(path);
     if (activeNode) {
-      activeNode.querySelector?.(':scope > .tree-label')?.classList.add('active');
+      const activeLabel = activeNode.querySelector?.(':scope > .tree-label');
+      activeLabel?.classList.add('active');
       expandAncestors(activeNode);
+      // アクティブノード自身も展開してサブカテゴリを表示（左クリックと同じ動作）
+      const activeChildren = activeNode.querySelector(':scope > .tree-children');
+      if (activeChildren) {
+        activeLabel?.classList.add('open');
+        activeChildren.classList.add('open');
+      }
+      // サイドバーのアクティブ項目をスクロールして見えるようにする
+      activeLabel?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
   }
   renderBreadcrumb(path);
@@ -939,13 +963,15 @@ function navigateTo(path) {
 }
 
 function findTreeNode(path) {
-  let cur = els.treeNav;
+  // ツリーノードは section-body の中にあるため、そこから検索開始
+  const root = els.treeNav.querySelector('.section-body') || els.treeNav;
+  let cur = root;
   for (const key of path) {
     const found = Array.from(cur.children).find(n => n.dataset?.key === key);
     if (!found) return null;
     const childWrap = found.querySelector('.tree-children');
-    cur = childWrap || found;
-    if (!childWrap) return found;
+    if (!childWrap) return found;   // 末端ノード
+    cur = childWrap;
   }
   return cur?.closest?.('.tree-node') || null;
 }
@@ -1161,8 +1187,17 @@ function createUpCard(path) {
 
   card.appendChild(name);
   card.addEventListener('click', () => {
-    if (path[0] === '__search_result__' || path[0] === '__search_query__') navigateTo([]);
-    else navigateTo(path.slice(0, -1));
+    if (path[0] === '__search_result__') {
+      // 単一タグの検索結果 → そのタグを内包するカテゴリへ
+      // ツリー未登録の場合は root へ
+      const bc = state.tagNodes.get(path[1])?.breadcrumb ?? [];
+      navigateTo(bc.length > 0 ? bc : []);
+    } else if (path[0] === '__search_query__') {
+      // フリーワード検索結果 → 上位カテゴリが不定なので root へ
+      navigateTo([]);
+    } else {
+      navigateTo(path.slice(0, -1));
+    }
   });
   return card;
 }
@@ -1342,7 +1377,7 @@ function createTagCard(tag) {
   copyBtn.title = 'コピー';
   copyBtn.addEventListener('click', e => {
     e.stopPropagation();
-    copyToClipboard(formatTagForExport(tag.name));
+    copyToClipboard(formatTagForExport(tag.name, { withComma: true }));
   });
 
   const wikiBtn = document.createElement('button');
@@ -1377,7 +1412,49 @@ function createTagCard(tag) {
   card.appendChild(name);
   card.appendChild(count);
   card.appendChild(actions);
-  card.addEventListener('click', () => toggleTagInScratchpad(tag.name));
+
+  // ── Long press / right-click → context menu ──
+  const tagBreadcrumb = state.tagNodes.get(tag.name)?.breadcrumb ?? [];
+  let _lpTimer = null;
+  let _lpStartX = 0, _lpStartY = 0;
+  let _suppressClick = false;
+
+  card.addEventListener('pointerdown', e => {
+    if (e.button !== 0 && e.button !== undefined) return; // 左ボタン以外は無視（右クリックは contextmenu で処理）
+    _lpStartX = e.clientX; _lpStartY = e.clientY;
+    document.body.classList.add('dte-no-select'); // 長押し開始時からテキスト選択を抑制
+    _lpTimer = setTimeout(() => {
+      _suppressClick = true;
+      showCardContextMenu(e.clientX, e.clientY, tag.name, tagBreadcrumb);
+      // showCardContextMenu 内でも dte-no-select を付与するが、
+      // タイマー発火前に pointerup → _cancelLP が走っても安全なよう二重管理
+    }, 500);
+  });
+  const _cancelLP = () => {
+    clearTimeout(_lpTimer); _lpTimer = null;
+    // メニューが表示されていなければ選択抑制を解除
+    if (els.cardContextMenu.classList.contains('hidden')) {
+      document.body.classList.remove('dte-no-select');
+    }
+  };
+  card.addEventListener('pointermove', e => {
+    // 8px 以上動いたらキャンセル
+    if (Math.hypot(e.clientX - _lpStartX, e.clientY - _lpStartY) > 8) _cancelLP();
+  });
+  card.addEventListener('pointerup',    _cancelLP);
+  card.addEventListener('pointerleave', _cancelLP);
+
+  // デスクトップ右クリック
+  card.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    _cancelLP();
+    showCardContextMenu(e.clientX, e.clientY, tag.name, tagBreadcrumb);
+  });
+
+  card.addEventListener('click', () => {
+    if (_suppressClick) { _suppressClick = false; return; }
+    toggleTagInScratchpad(tag.name);
+  });
   return card;
 }
 
@@ -1479,7 +1556,24 @@ function handleSearch(query) {
     const pathSpan = document.createElement('span');
     pathSpan.className = 'search-result-path';
     if (breadcrumb.length > 0) {
-      pathSpan.textContent = breadcrumb.map(translateCategory).join(' › ');
+      breadcrumb.forEach((seg, i) => {
+        if (i > 0) {
+          const sep = document.createElement('span');
+          sep.textContent = ' › ';
+          pathSpan.appendChild(sep);
+        }
+        const link = document.createElement('span');
+        link.className = 'search-result-path-link';
+        link.textContent = translateCategory(seg);
+        link.title = seg;
+        link.addEventListener('click', e => {
+          e.stopPropagation();
+          els.searchOverlay.classList.add('hidden');
+          els.globalSearch.value = '';
+          navigateTo(breadcrumb.slice(0, i + 1));
+        });
+        pathSpan.appendChild(link);
+      });
       pathSpan.title = breadcrumb.join(' > ');
     } else {
       pathSpan.textContent = '未分類 ';
@@ -1538,10 +1632,13 @@ function escHtml(s) {
 }
 
 // ── Scratchpad & Clipboard ──────────────────────
-function formatTagForExport(tagName) {
+function formatTagForExport(tagName, { withComma = false } = {}) {
   let res = tagName.replace(/\(/g, '\\(').replace(/\)/g, '\\)');
   if (els.replaceUnderscore && els.replaceUnderscore.checked) {
     res = res.replace(/_/g, ' ');
+  }
+  if (withComma && els.appendComma?.checked) {
+    res = res + ', ';
   }
   return res;
 }
@@ -1795,6 +1892,13 @@ if (els.replaceUnderscore) {
     localStorage.setItem('replaceUnderscore', e.target.checked);
   });
 }
+if (els.appendComma) {
+  // デフォルト ON（localStorage に明示的に 'false' が保存されている場合のみ OFF）
+  els.appendComma.checked = localStorage.getItem('appendComma') !== 'false';
+  els.appendComma.addEventListener('change', e => {
+    localStorage.setItem('appendComma', e.target.checked);
+  });
+}
 
 // Theme toggle — shared logic used by both header checkbox and sidebar button
 function setTheme(light) {
@@ -1888,6 +1992,79 @@ els.globalSearch.addEventListener('keydown', e => {
   }
 });
 
+// "↵ Enter で一覧表示" hint — クリックで Enter と同じ動作
+els.searchEnterHint.addEventListener('click', () => {
+  const query = els.globalSearch.value.trim();
+  if (query) {
+    addHistorySearch(query);
+    els.searchOverlay.classList.add('hidden');
+    els.globalSearch.value = '';
+    els.globalSearch.blur();
+    navigateTo(['__search_query__', query]);
+  }
+});
+
+// ── Card context menu ──────────────────────────
+// モジュールレベルで現在のターゲット情報を保持
+let _ctxMenuTag = null;
+let _ctxMenuBreadcrumb = null;
+
+function showCardContextMenu(x, y, tagName, breadcrumb) {
+  _ctxMenuTag = tagName;
+  _ctxMenuBreadcrumb = breadcrumb;
+
+  const menu = els.cardContextMenu;
+  menu.style.left = x + 'px';
+  menu.style.top  = y + 'px';
+  menu.classList.remove('hidden');
+  document.body.classList.add('dte-no-select'); // メニュー表示中のテキスト選択を抑制
+
+  // 画面端からはみ出さないよう調整（次フレームでサイズが確定してから）
+  requestAnimationFrame(() => {
+    const r = menu.getBoundingClientRect();
+    if (r.right  > window.innerWidth)  menu.style.left = (x - r.width)  + 'px';
+    if (r.bottom > window.innerHeight) menu.style.top  = (y - r.height) + 'px';
+  });
+}
+
+function hideCardContextMenu() {
+  els.cardContextMenu.classList.add('hidden');
+  document.body.classList.remove('dte-no-select');
+  _ctxMenuTag = null;
+  _ctxMenuBreadcrumb = null;
+}
+
+els.ctxDanbooruPosts.addEventListener('click', () => {
+  if (_ctxMenuTag) {
+    const url = 'https://danbooru.donmai.us/posts?tags=' + encodeURIComponent(_ctxMenuTag);
+    window.open(url, '_blank', 'noopener');
+  }
+  hideCardContextMenu();
+});
+
+els.ctxDetail.addEventListener('click', () => {
+  const tag = _ctxMenuTag;
+  const bc  = _ctxMenuBreadcrumb;
+  hideCardContextMenu();
+  if (tag) openTagDetail(tag, bc);
+});
+
+// コンテキストメニュー外クリックで閉じる
+document.addEventListener('pointerdown', e => {
+  if (!els.cardContextMenu.classList.contains('hidden') &&
+      !els.cardContextMenu.contains(e.target)) {
+    hideCardContextMenu();
+  }
+}, { capture: true });
+
+// Escape で閉じる
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    hideCardContextMenu();
+    closeTagDetail();
+  }
+});
+
 // Breadcrumb home
 els.breadcrumbHome.addEventListener('click', () => {
   state.currentPath = [];
@@ -1937,6 +2114,137 @@ document.addEventListener('click', e => {
   }
 });
 
+// ── Tag Detail Modal ──────────────────────────
+function openTagDetail(tagName, breadcrumb) {
+  const catColors = {
+    0: 'var(--cat-0)', 1: 'var(--cat-1)', 3: 'var(--cat-3)',
+    4: 'var(--cat-4)', 5: 'var(--cat-5)'
+  };
+  const meta  = state.tagMeta.get(tagName);
+  const color = catColors[meta?.category] ?? 'var(--cat-x)';
+  const jaName = state.translations?.get(tagName) ?? '';
+
+  // ── 基本情報 ──
+  els.detailTagName.textContent  = tagName;
+  els.detailTagName.style.color  = color;
+  els.detailTagJa.textContent    = jaName;
+  els.detailTagJa.style.display  = jaName ? '' : 'none';
+
+  // Post count
+  const count = meta?.count ?? 0;
+  els.detailPostCount.textContent = count > 0 ? count.toLocaleString() + ' posts' : '';
+
+  // Breadcrumb (clickable)
+  els.detailBreadcrumb.innerHTML = '';
+  const bc = breadcrumb ?? state.tagNodes.get(tagName)?.breadcrumb ?? [];
+  if (bc.length > 0) {
+    bc.forEach((seg, i) => {
+      if (i > 0) {
+        const sep = document.createElement('span');
+        sep.className = 'detail-bc-sep';
+        sep.textContent = ' › ';
+        els.detailBreadcrumb.appendChild(sep);
+      }
+      const span = document.createElement('span');
+      span.className = 'detail-bc-link';
+      span.textContent = translateCategory(seg);
+      span.addEventListener('click', () => {
+        closeTagDetail();
+        els.searchOverlay.classList.add('hidden');
+        navigateTo(bc.slice(0, i + 1));
+      });
+      els.detailBreadcrumb.appendChild(span);
+    });
+  } else {
+    const span = document.createElement('span');
+    span.className = 'detail-bc-none';
+    span.textContent = '（カテゴリ未登録）';
+    els.detailBreadcrumb.appendChild(span);
+  }
+
+  // Wiki body (async) — 全文表示・タグリンク付き
+  els.detailWikiBody.innerHTML = '<span class="detail-wiki-loading">…</span>';
+  fetchTagWikiInfo(tagName).then(info => {
+    els.detailWikiBody.innerHTML = '';
+    if (!info || (!info.otherNames.length && !info.rawBody)) {
+      els.detailWikiBody.textContent = '（Wiki 情報なし）';
+      return;
+    }
+    if (info.otherNames.length > 0) {
+      const aliasEl = document.createElement('div');
+      aliasEl.className = 'detail-wiki-aliases';
+      const aliasLabel = document.createElement('span');
+      aliasLabel.className = 'detail-wiki-alias-label';
+      aliasLabel.textContent = 'Aliases: ';
+      aliasEl.appendChild(aliasLabel);
+      info.otherNames.forEach((name, i) => {
+        if (i > 0) aliasEl.appendChild(document.createTextNode(' / '));
+        const span = document.createElement('span');
+        span.className = 'detail-wiki-taglink';
+        span.textContent = name;
+        span.title = name;
+        span.addEventListener('click', () => openTagDetail(name.replace(/ /g, '_'), state.tagNodes.get(name.replace(/ /g, '_'))?.breadcrumb));
+        aliasEl.appendChild(span);
+      });
+      els.detailWikiBody.appendChild(aliasEl);
+    }
+    if (info.rawBody) {
+      renderWikiBody(info.rawBody, els.detailWikiBody);
+    }
+    if (!info.otherNames.length && !info.rawBody) {
+      els.detailWikiBody.textContent = '（Wiki 情報なし）';
+    }
+  });
+
+  // ── お気に入りボタン ──
+  _updateDetailFavBtn(tagName);
+
+  // ── フッターボタン ──
+  els.detailWikiBtn.onclick = () => {
+    const tagNode = state.tagNodes.get(tagName);
+    const tagUrl  = tagNode?.url || `/wiki_pages/${tagName}`;
+    const url = tagUrl.startsWith('http') ? tagUrl : `https://danbooru.donmai.us${tagUrl}`;
+    window.open(url, '_blank', 'noopener');
+  };
+  els.detailFavBtn.onclick = () => {
+    if (state.favTags.has(tagName)) {
+      state.favTags.delete(tagName);
+      showToast('♡ お気に入りから削除しました');
+    } else {
+      state.favTags.add(tagName);
+      showToast('♥ お気に入りに追加しました');
+    }
+    saveFavs();
+    renderFavTree();
+    rerenderCurrent();
+    _updateDetailFavBtn(tagName);
+  };
+  els.detailCopyBtn.onclick = () => {
+    copyToClipboard(formatTagForExport(tagName, { withComma: true }));
+  };
+
+  // ── 表示 ──
+  els.tagDetailOverlay.classList.remove('hidden');
+  document.body.classList.add('dte-no-select');
+}
+
+function _updateDetailFavBtn(tagName) {
+  const isFav = state.favTags.has(tagName);
+  els.detailFavBtn.textContent = isFav ? '♥ お気に入り解除' : '♡ お気に入り';
+  els.detailFavBtn.classList.toggle('active', isFav);
+}
+
+function closeTagDetail() {
+  els.tagDetailOverlay.classList.add('hidden');
+  document.body.classList.remove('dte-no-select');
+}
+
+// モーダル外クリックで閉じる
+els.tagDetailOverlay.addEventListener('click', e => {
+  if (e.target === els.tagDetailOverlay) closeTagDetail();
+});
+els.detailCloseBtn.addEventListener('click', closeTagDetail);
+
 // ── Wiki Preview Tooltip ──────────────────────────
 const wikiPreviewEl = (() => {
   const el = document.createElement('div');
@@ -1947,8 +2255,75 @@ const wikiPreviewEl = (() => {
 
 const _wikiInfoCache = new Map();
 
+// ── Wiki DText レンダラー（モーダル用・タグリンク付き）────
+function renderWikiBody(text, container) {
+  // 基本的なフォーマットタグを除去しつつ [[tag]] / {{tag}} は保持
+  let processed = text
+    .replace(/\[(?:b|i|s|u|tn)\](.*?)\[\/(?:b|i|s|u|tn)\]/gs, '$1')
+    .replace(/\[spoiler\](.*?)\[\/spoiler\]/gs, '[$1]')
+    .replace(/\[url=[^\]]+\](.*?)\[\/url\]/gs, '$1')
+    .replace(/\[(?:table|thead|tbody|tr|th|td)[^\]]*\](.*?)\[\/(?:table|thead|tbody|tr|th|td)\]/gs, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  const lines = processed.split('\n');
+  for (const line of lines) {
+    if (!line.trim()) {
+      container.appendChild(document.createElement('br'));
+      continue;
+    }
+    const headerMatch = line.match(/^h([1-6])\.\s*(.*)/);
+    if (headerMatch) {
+      const el = document.createElement('div');
+      el.className = 'detail-wiki-heading detail-wiki-h' + headerMatch[1];
+      appendWikiInline(headerMatch[2], el);
+      container.appendChild(el);
+      continue;
+    }
+    const listMatch = line.match(/^(\*+)\s*(.*)/);
+    if (listMatch) {
+      const el = document.createElement('div');
+      el.className = 'detail-wiki-listitem';
+      el.style.paddingLeft = (listMatch[1].length * 14) + 'px';
+      el.appendChild(document.createTextNode('• '));
+      appendWikiInline(listMatch[2], el);
+      container.appendChild(el);
+      continue;
+    }
+    const el = document.createElement('div');
+    el.className = 'detail-wiki-line';
+    appendWikiInline(line, el);
+    container.appendChild(el);
+  }
+}
+
+function appendWikiInline(text, container) {
+  // [[tag_name]] [[tag_name|display]] {{tag_name}} をクリッカブルに
+  const pat = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]|\{\{([^}|]+)(?:\|[^}]*)?\}\}/g;
+  let last = 0, m;
+  while ((m = pat.exec(text)) !== null) {
+    if (m.index > last) container.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const rawTag   = (m[1] ?? m[3]).trim();
+    const tagName  = rawTag.replace(/ /g, '_').toLowerCase();
+    const display  = (m[2] ?? m[1] ?? m[3]).trim();
+    const span = document.createElement('span');
+    span.className = 'detail-wiki-taglink';
+    span.textContent = display;
+    span.title = tagName;
+    span.addEventListener('click', () =>
+      openTagDetail(tagName, state.tagNodes.get(tagName)?.breadcrumb));
+    container.appendChild(span);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) container.appendChild(document.createTextNode(text.slice(last)));
+}
+
 async function fetchTagWikiInfo(tagName) {
-  if (_wikiInfoCache.has(tagName)) return _wikiInfoCache.get(tagName);
+  if (_wikiInfoCache.has(tagName)) {
+    const cached = _wikiInfoCache.get(tagName);
+    // rawBody がないキャッシュ（旧フォーマット）はスキップして再取得
+    if (cached === null || cached.rawBody !== undefined) return cached;
+  }
   try {
     const res = await fetch(
       `https://danbooru.donmai.us/wiki_pages/${encodeURIComponent(tagName)}.json`,
@@ -1959,6 +2334,7 @@ async function fetchTagWikiInfo(tagName) {
     const info = {
       otherNames: Array.isArray(data.other_names) ? data.other_names : [],
       body: dTextToPlain(data.body || ''),
+      rawBody: data.body || '',
     };
     _wikiInfoCache.set(tagName, info);
     return info;
@@ -2093,7 +2469,7 @@ highlightStyle.textContent = `
 `;
 document.head.appendChild(highlightStyle);
 
-// ── Init ─────────────────────────────────────────
+// Init
 initResizer();
 initMobileSidebar();
 initScratchpadToggle();

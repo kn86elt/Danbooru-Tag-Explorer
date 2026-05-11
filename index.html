@@ -66,9 +66,38 @@
   <div id="search-results-overlay" class="search-results-overlay hidden">
     <div class="search-results-header">
       <span><span id="search-results-count">0件</span>の結果</span>
-      <span class="search-enter-hint">↵ Enter で一覧表示</span>
+      <span id="search-enter-hint" class="search-enter-hint">↵ Enter で一覧表示</span>
     </div>
     <ul id="search-results-list" class="search-results-list"></ul>
+  </div>
+
+  <!-- Card context menu -->
+  <div id="card-context-menu" class="card-context-menu hidden" role="menu">
+    <button id="ctx-danbooru-posts" class="ctx-menu-item">🔗 danbooruで投稿を表示</button>
+    <button id="ctx-detail"         class="ctx-menu-item">📋 詳細…</button>
+  </div>
+
+  <!-- Tag detail modal -->
+  <div id="tag-detail-overlay" class="tag-detail-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="detail-tag-name">
+    <div class="tag-detail-modal">
+      <div class="tag-detail-header">
+        <div class="tag-detail-name-wrap">
+          <span id="detail-tag-name" class="tag-detail-name"></span>
+          <span id="detail-tag-ja"   class="tag-detail-ja"></span>
+        </div>
+        <button id="detail-close-btn" class="tag-detail-close" aria-label="閉じる">✕</button>
+      </div>
+      <div class="tag-detail-meta">
+        <span id="detail-breadcrumb" class="tag-detail-breadcrumb"></span>
+        <span id="detail-post-count" class="tag-detail-count"></span>
+      </div>
+      <div id="detail-wiki-body" class="tag-detail-wiki"></div>
+      <div class="tag-detail-footer">
+        <button id="detail-wiki-btn"  class="btn-detail-action">🌐 Danbooru Wiki</button>
+        <button id="detail-fav-btn"   class="btn-detail-action">♡ お気に入り</button>
+        <button id="detail-copy-btn"  class="btn-detail-action">📋 コピー</button>
+      </div>
+    </div>
   </div>
 
   <!-- Main Layout -->
@@ -192,6 +221,10 @@
       <button id="scratchpad-toggle" class="scratchpad-toggle-btn" title="スクラッチパッドを折りたたむ" aria-label="スクラッチパッド折りたたみ">▼</button>
       <span class="scratchpad-title">📝 Scratchpad</span>
       <div class="scratchpad-actions">
+        <label class="toggle-label" style="margin-right: 12px; font-size: 11px;">
+          <input type="checkbox" id="append-comma" checked />
+          <span>コンマを付加</span>
+        </label>
         <label class="toggle-label" style="margin-right: 12px; font-size: 11px;">
           <input type="checkbox" id="replace-underscore" />
           <span>_をスペースに変換</span>

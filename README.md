@@ -3,12 +3,13 @@
 Danbooru のタグをカテゴリツリーから探すためのローカルビューアです。
 
 - カテゴリツリーでタグを階層的に探索
-- 各タグのdanbooru wikiプレビュー表示とリンク機能
+- **タグ詳細モーダル**: タグ名・日本語訳・パンくず・post 数・Danbooru Wiki 全文表示（`[[tag]]` リンクをクリックで連鎖表示）
+- 各タグのdanbooru wikiホバープレビュー表示とリンク機能
 - タグ名・日本語名での全文インクリメンタル検索
 - 複数タグのand検索
 - お気に入り・ピン止め（複数端末で共有可）
 - 検索・カテゴリ・スクラッチパッドの履歴（ブラウザごとに保持）
-- スクラッチパッドへのタグ蓄積とコピー
+- スクラッチパッドへのタグ蓄積とコピー（コンマ自動付加オプション付き）
 - グリッドビュー: カードサイズ S / M / L の切り替え（文字サイズ・折り返し・日本語表示が自動調整）
 - モバイル・スマートフォン対応
 - A1111系Stable Diffusion WEBUIの拡張として動作可能
@@ -171,23 +172,8 @@ python tools/build_tag_tree.py --out data/tag_tree.fixed.json --report data/tag_
 
 問題なければ `data/tag_tree.fixed.json` を `data/tag_tree.json` に差し替えます。
 
-生成スクリプトは Danbooru Wiki / API にアクセスします。
-サーバー負荷を避けるため、繰り返し実行や定期実行はしないでください。
-リクエスト間には既定で 1 秒の待機が入っています。
+生
 
 ## 更新履歴
 
 [CHANGELOG.md](CHANGELOG.md) を参照してください。
-
-## 開発について
-
-本プロジェクトには各種生成AIによる成果物が含まれています。
-
-## License
-
-Code in this repository is licensed under MIT.
-
-Generated tag tree data is derived from public Danbooru wiki/tag metadata and the
-historical seed structure from KohakuBlueleaf/danbooru-tag-tree.
-No ownership of Danbooru-originated metadata is claimed.
-Please follow Danbooru's terms and the upstream sources' terms when using the generated data.
