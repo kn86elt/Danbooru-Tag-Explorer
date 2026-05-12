@@ -117,6 +117,8 @@ const state = {
     categories:  JSON.parse(localStorage.getItem('history_categories')  || '[]'),
     stocks:      JSON.parse(localStorage.getItem('history_stocks')      || '[]'),
   },
+  // History type filter (which types are visible)
+  historyFilter: JSON.parse(localStorage.getItem('historyFilter') || '{"search":true,"category":true,"stock":true}'),
   // Sidebar section collapse state
   sectionCollapsed: JSON.parse(localStorage.getItem('sectionCollapsed') || '{}'),
 };
@@ -622,7 +624,35 @@ function renderHistoryNav() {
   els.historyDivider.style.display = hasAny ? 'block' : 'none';
   if (!hasAny) return;
 
-  nav.appendChild(makeSectionHeader('📋 履歴', 'history', totalCount));
+  const f = state.historyFilter;
+  const visibleCount =
+    (f.search   ? searches.length   : 0) +
+    (f.category ? categories.length : 0) +
+    (f.stock    ? stocks.length     : 0);
+
+  const header = makeSectionHeader('📋 履歴', 'history', visibleCount);
+
+  // フィルターボタン（🔍 📁 🏷️）
+  const filterWrap = document.createElement('span');
+  filterWrap.className = 'history-filter-wrap';
+  const mkBtn = (icon, key, title) => {
+    const btn = document.createElement('button');
+    btn.className = 'history-filter-btn' + (f[key] ? ' active' : '');
+    btn.textContent = icon;
+    btn.title = title;
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      state.historyFilter[key] = !state.historyFilter[key];
+      localStorage.setItem('historyFilter', JSON.stringify(state.historyFilter));
+      renderHistoryNav();
+    });
+    filterWrap.appendChild(btn);
+  };
+  mkBtn('🔍', 'search',   '検索履歴を表示/非表示');
+  mkBtn('📁', 'category', 'カテゴリ履歴を表示/非表示');
+  mkBtn('🏷️', 'stock',    'タグ履歴を表示/非表示');
+  header.appendChild(filterWrap);
+  nav.appendChild(header);
 
   const body = document.createElement('div');
   body.className = 'section-body';
@@ -676,7 +706,7 @@ function renderHistoryNav() {
   }
 
   // 🔍 検索
-  renderHistoryGroup('🔍', searches.map(e => ({
+  if (f.search) renderHistoryGroup('🔍', searches.map(e => ({
     label: `"${e.q}"`,
     sublabel: '',
     onNavigate: () => navigateTo(['__search_query__', e.q]),
@@ -688,7 +718,7 @@ function renderHistoryNav() {
   })));
 
   // 📁 カテゴリ
-  renderHistoryGroup('📁', categories.map(e => ({
+  if (f.category) renderHistoryGroup('📁', categories.map(e => ({
     label: translateCategory(e.path[e.path.length - 1]),
     sublabel: e.path.length > 1
       ? e.path.slice(0, -1).map(translateCategory).join(' › ')
@@ -703,7 +733,7 @@ function renderHistoryNav() {
   })));
 
   // 🏷️ タグ（旧称: ストック）
-  renderHistoryGroup('🏷️', stocks.map(e => ({
+  if (f.stock) renderHistoryGroup('🏷️', stocks.map(e => ({
     label: e.name,
     sublabel: '',
     onNavigate: () => navigateTo(['__search_result__', e.name]),
@@ -2127,6 +2157,27 @@ function openTagDetail(tagName, breadcrumb) {
   // ── 基本情報 ──
   els.detailTagName.textContent  = tagName;
   els.detailTagName.style.color  = color;
+  els.detailTagName.title        = 'クリックでカードに移動';
+  els.detailTagName.style.cursor = 'pointer';
+  els.detailTagName.onclick = () => {
+    const bc = state.tagNodes.get(tagName)?.breadcrumb ?? [];
+    closeTagDetail();
+    if (bc.length > 0) {
+      navigateTo(bc);
+      // カードが描画されたあとスクロール＆ハイライト
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const card = els.tagsGrid.querySelector(`[data-tag-name="${CSS.escape(tagName)}"]`);
+        if (card) {
+          card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          card.classList.add('highlight');
+          setTimeout(() => card.classList.remove('highlight'), 1800);
+        }
+      }));
+    } else {
+      // カテゴリ未登録：検索結果に移動
+      navigateTo(['__search_result__', tagName]);
+    }
+  };
   els.detailTagJa.textContent    = jaName;
   els.detailTagJa.style.display  = jaName ? '' : 'none';
 
