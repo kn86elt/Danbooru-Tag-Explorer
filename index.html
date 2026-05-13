@@ -219,7 +219,19 @@
   <div id="scratchpad" class="scratchpad">
     <div class="scratchpad-header">
       <button id="scratchpad-toggle" class="scratchpad-toggle-btn" title="スクラッチパッドを折りたたむ" aria-label="スクラッチパッド折りたたみ">▼</button>
-      <span class="scratchpad-title">📝 Scratchpad</span>
+      <!-- A1111 integration: hidden in standalone mode, shown by initA1111Mode() -->
+      <div id="a1111-actions" class="a1111-actions hidden">
+        <select id="a1111-prompt-target" class="a1111-select" title="対象プロンプト">
+          <option value="positive">Positive</option>
+          <option value="negative">Negative</option>
+        </select>
+        <button id="a1111-read-btn" class="btn-icon a1111-btn" title="txt2img のプロンプトを読み込む">
+          <span class="btn-label">Read from txt2img</span>
+        </button>
+        <button id="a1111-send-btn" class="btn-icon a1111-btn a1111-send" title="スクラッチパッドの内容を txt2img に送出">
+          <span class="btn-label">Send to txt2img</span>
+        </button>
+      </div>
       <div class="scratchpad-actions">
         <label class="toggle-label" style="margin-right: 12px; font-size: 11px;">
           <input type="checkbox" id="append-comma" checked />
@@ -242,19 +254,6 @@
           <span class="btn-label">クリア</span>
         </button>
       </div>
-    </div>
-    <!-- A1111 integration bar: hidden in standalone mode, shown by initA1111Mode() -->
-    <div id="a1111-actions" class="a1111-actions hidden">
-      <select id="a1111-prompt-target" class="a1111-select" title="対象プロンプト">
-        <option value="positive">Positive</option>
-        <option value="negative">Negative</option>
-      </select>
-      <button id="a1111-read-btn" class="btn-icon a1111-btn" title="txt2img のプロンプトを読み込む">
-        <span class="btn-label">Read from txt2img</span>
-      </button>
-      <button id="a1111-send-btn" class="btn-icon a1111-btn a1111-send" title="スクラッチパッドの内容を txt2img に送出">
-        <span class="btn-label">Send to txt2img</span>
-      </button>
     </div>
     <textarea id="scratchpad-input" class="scratchpad-input" placeholder="クリックしたタグがここにストックされます... カンマ区切りで自由に追加・編集できます。" spellcheck="false"></textarea>
   </div>

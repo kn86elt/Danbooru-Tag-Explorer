@@ -1220,19 +1220,16 @@ body {
 .scratchpad-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 8px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
-.scratchpad-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-}
 .scratchpad-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+  margin-left: auto; /* 右端に寄せる */
 }
 .scratchpad-input {
   flex: 1;
@@ -1377,21 +1374,17 @@ body {
   opacity: 0.4;
   pointer-events: none;
 }
-.scratchpad.collapsed .a1111-actions {
-  display: none;
-}
-
-/* ---------- A1111 Integration Bar ---------- */
+/* ---------- A1111 Integration ---------- */
 .a1111-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 16px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
 }
 /* .hidden はユーティリティクラスで制御する */
+.scratchpad.collapsed .a1111-actions {
+  opacity: 0.4;
+  pointer-events: none;
+}
 
 .a1111-select {
   background: var(--surface2);
