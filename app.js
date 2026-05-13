@@ -1717,20 +1717,31 @@ function copyToClipboard(text) {
 function toggleTagInScratchpad(name) {
   const formatted = formatTagForExport(name);
   const input = els.scratchpadInput;
-  let text = input.value;
-  let tags = text.split(',').map(t => t.trim()).filter(Boolean);
+  const text = input.value;
 
-  const idx = tags.indexOf(formatted);
-  if (idx > -1) {
-    tags.splice(idx, 1);
+  // タグが含まれているか判定（改行・カンマ両方で分割して全トークンを走査）
+  const allTags = text.split(/[\n,]/).map(t => t.trim()).filter(Boolean);
+
+  if (allTags.includes(formatted)) {
+    // 削除: 行単位で処理し、対象タグが含まれる行だけを変更する
+    const newText = text.split('\n').map(line => {
+      const parts = line.split(',');
+      const newParts = parts.filter(t => t.trim() !== formatted);
+      if (newParts.length === parts.length) return line; // 変化なし → そのまま
+      // 変化あり: trimして再結合（その行のみ整形）
+      const remaining = newParts.map(t => t.trim()).filter(Boolean);
+      return remaining.length > 0 ? remaining.join(', ') + ', ' : '';
+    }).join('\n');
+    input.value = newText;
+    input.dispatchEvent(new Event('input'));
     showToast(`🗑 ストック削除: ${formatted}`);
   } else {
-    tags.push(formatted);
+    // 追加: カーソル位置に挿入
+    insertAtScratchpadCursor(formatted);
     showToast(`📝 ストック追加: ${formatted}`);
     addHistoryStock(name); // ← record in history
   }
 
-  input.value = tags.length > 0 ? tags.join(', ') + ', ' : '';
   input.scrollTop = input.scrollHeight;
 }
 
@@ -2767,7 +2778,7 @@ function hideWikiPreview() {
   wikiPreviewEl._activeTag = null;
 }
 
-// ── Highlight CSS ────────────────────────────────
+// ── Highlight CSS ────────────────────────────────────
 const highlightStyle = document.createElement('style');
 highlightStyle.textContent = `
   .tag-card.highlight {
