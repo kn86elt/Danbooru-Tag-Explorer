@@ -1377,6 +1377,96 @@ body {
   opacity: 0.4;
   pointer-events: none;
 }
+.scratchpad.collapsed .a1111-actions {
+  display: none;
+}
+
+/* ---------- A1111 Integration Bar ---------- */
+.a1111-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+/* .hidden はユーティリティクラスで制御する */
+
+.a1111-select {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: border-color var(--t-fast);
+}
+.a1111-select:hover  { border-color: var(--border-hover); }
+.a1111-select:focus  { outline: none; border-color: var(--accent); }
+.a1111-select option { background: var(--surface2); color: var(--text); }
+
+.a1111-btn { font-size: 12px; }
+
+/* Send ボタンはアクセントカラーで区別 */
+.a1111-send {
+  border-color: rgba(138,123,248,0.35);
+  color: var(--accent);
+}
+.a1111-send:hover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* ---------- DTE Dialog ---------- */
+.dte-dialog {
+  background: var(--surface2);
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  color: var(--text);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+  max-width: 400px;
+  width: 90%;
+  /* z-index は ::backdrop の下に潜らないよう十分高くする */
+  z-index: 20000;
+}
+.dte-dialog::backdrop {
+  background: rgba(0,0,0,0.6);
+}
+
+.dte-dialog-message {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.dte-dialog-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.dte-dialog-btn {
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 7px 14px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--t-fast);
+}
+.dte-dialog-btn:hover    { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.dte-dialog-btn--cancel  { color: var(--text-muted); }
+.dte-dialog-btn--primary { border-color: rgba(138,123,248,0.35); color: var(--accent); }
+.dte-dialog-btn--primary:hover { border-color: var(--accent); background: var(--accent-dim); }
 
 /* ---------- History section styles ---------- */
 .sidebar-section-header {

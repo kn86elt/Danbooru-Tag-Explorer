@@ -96,6 +96,12 @@ function translateCategory(name) {
 
 const HISTORY_MAX = 30;
 
+// A1111 モードフラグ。
+// A1111 環境では build_index_html() が window.__DTE_MODE__ = 'a1111' を注入するため、
+// API 呼び出しを待たずモジュールロード時に 'a1111' で初期化される。
+// boot() 内で loadServerSettings() の結果により更新されるが、API 失敗時は注入値を保持。
+let _mode = (typeof window.__DTE_MODE__ === 'string') ? window.__DTE_MODE__ : null;
+
 const state = {
   tree: null,           // parsed tag_tree.json
   tagMeta: new Map(),   // name → {count, category}
@@ -331,6 +337,15 @@ const els = {
   detailFavBtn:       $('detail-fav-btn'),
   detailCopyBtn:      $('detail-copy-btn'),
   detailCloseBtn:     $('detail-close-btn'),
+  // A1111 integration
+  a1111Actions:        $('a1111-actions'),
+  a1111ReadBtn:        $('a1111-read-btn'),
+  a1111SendBtn:        $('a1111-send-btn'),
+  a1111PromptTarget:   $('a1111-prompt-target'),
+  scratchpadFormatBtn: $('scratchpad-format-btn'),
+  dteDialog:           $('dte-dialog'),
+  dteDialogMessage:    $('dte-dialog-message'),
+  dteDialogButtons:    $('dte-dialog-buttons'),
 };
 
 // ── Boot ────────────────────────────────────────
@@ -338,7 +353,8 @@ async function boot() {
   try {
     // Step 1: fetch server settings first to resolve CSV paths + favs/pins
     updateLoadingText('設定を読み込み中…');
-    const { tagCsv, jaCsv, _mode } = await loadServerSettings();
+    const { tagCsv, jaCsv, _mode: detectedMode } = await loadServerSettings();
+    _mode = detectedMode ?? _mode;  // API 成功時は上書き、失敗時は注入値(__DTE_MODE__)を保持
 
     // A1111モードでは専用エンドポイント経由でCSVを取得する。
     // これにより shared.opts で設定された絶対パスや BASE_DIR 外のファイルも配信できる。
@@ -385,6 +401,8 @@ async function boot() {
     renderTree();
     updateStats();
     hideLoading();
+
+    if (_mode === 'a1111') initA1111Mode();
 
     state.observer = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting) {
@@ -2124,6 +2142,252 @@ els.scratchpadInput.addEventListener('input', () => {
     localStorage.setItem('scratchpad', els.scratchpadInput.value);
   }, 500);
 });
+
+els.scratchpadFormatBtn?.addEventListener('click', formatScratchpad);
+
+// ── A1111 txt2img Integration ────────────────────────────────────────────────
+
+/**
+ * A1111 / reForge / Forge は同一オリジン (localhost) なので window.parent.document に
+ * 直接アクセスできる。旧世代 A1111 は Gradio が shadow DOM を使うため gradioApp() を
+ * 経由してルートを取得する。
+ */
+function getParentRoot() {
+  try {
+    const fn = window.parent.gradioApp;
+    if (typeof fn === 'function') return fn();
+  } catch (_e) {}
+  return window.parent.document;
+}
+
+/** positive / negative それぞれの textarea を探す。見つからなければ null を返す。 */
+function findPromptTextarea(target) {
+  const SELECTORS = {
+    positive: ['#txt2img_prompt textarea'],
+    negative: ['#txt2img_neg_prompt textarea'],
+  };
+  const root = getParentRoot();
+  for (const sel of (SELECTORS[target] || SELECTORS.positive)) {
+    const el = root.querySelector(sel);
+    if (el) return el;
+  }
+  return null;
+}
+
+/**
+ * Promise ベースのモーダルダイアログを表示する。
+ * @param {object} opts
+ * @param {string}   opts.message  - ダイアログ本文
+ * @param {Array}    opts.buttons  - [{label, value}] 。先頭がキャンセル相当
+ * @returns {Promise<string>}  押されたボタンの value。backdrop / ESC は 'cancel' を返す。
+ */
+function showDteDialog({ message, buttons }) {
+  return new Promise(resolve => {
+    const dialog  = els.dteDialog;
+    els.dteDialogMessage.textContent = message;
+    els.dteDialogButtons.innerHTML   = '';
+
+    let resolved = false;
+    const cleanup = value => {
+      if (resolved) return;
+      resolved = true;
+      dialog.close();
+      resolve(value);
+    };
+
+    buttons.forEach(({ label, value }, idx) => {
+      const btn = document.createElement('button');
+      btn.className  = 'dte-dialog-btn';
+      if (idx === 0) btn.classList.add('dte-dialog-btn--cancel');
+      if (idx === buttons.length - 1 && buttons.length > 1)
+        btn.classList.add('dte-dialog-btn--primary');
+      btn.textContent = label;
+      btn.addEventListener('click', () => cleanup(value));
+      els.dteDialogButtons.appendChild(btn);
+    });
+
+    // backdrop クリック → キャンセル
+    const onDialogClick = e => {
+      if (e.target === dialog) {
+        dialog.removeEventListener('click', onDialogClick);
+        cleanup('cancel');
+      }
+    };
+    dialog.addEventListener('click', onDialogClick);
+
+    // ESC → キャンセル
+    dialog.addEventListener('cancel', e => {
+      e.preventDefault();
+      cleanup('cancel');
+    }, { once: true });
+
+    dialog.showModal();
+  });
+}
+
+/**
+ * スクラッチパッドの before / after と挿入テキスト text から
+ * junction に必要なコンマ区切りを計算する。
+ * 実際の文字列は変更せず、比較にのみ trim を使う。
+ *
+ * before の末尾パターン:
+ *   "tag, " → すでに `, ` あり → 追加不要
+ *   "tag,"  → コンマのみ → スペースだけ追加
+ *   "tag"   → 何もなし  → `, ` を追加
+ * after の先頭パターン:
+ *   ", tag" / ",tag" → コンマあり → 追加不要
+ *   "tag"            → なし        → `, ` を追加
+ */
+function buildJunctionSeparators(before, after, text) {
+  let sepBefore = '';
+  if (before.length > 0 && !text.startsWith(',')) {
+    const bTrimmed = before.trimEnd();
+    if (bTrimmed.length === 0) {
+      // before が空白のみ → 区切り不要
+    } else if (bTrimmed.endsWith(',')) {
+      // コンマが末尾にある: `, ` で終わっていればスペース不要、そうでなければ追加
+      sepBefore = before.endsWith(', ') ? '' : ' ';
+    } else {
+      sepBefore = ', ';
+    }
+  }
+
+  let sepAfter = '';
+  if (after.length > 0 && !text.endsWith(',')) {
+    const aTrimmed = after.trimStart();
+    if (aTrimmed.length === 0) {
+      // after が空白のみ → 区切り不要
+    } else if (aTrimmed.startsWith(',')) {
+      // after 側にコンマがある → 追加不要
+    } else {
+      sepAfter = ', ';
+    }
+  }
+
+  return { sepBefore, sepAfter };
+}
+
+/**
+ * スクラッチパッドのカーソル位置に text を挿入する。
+ * スクラッチパッドが空のときもこの関数を使う（separator が付かないだけ）。
+ */
+function insertAtScratchpadCursor(text) {
+  const input = els.scratchpadInput;
+  const pos    = input.selectionStart ?? input.value.length;
+  const before = input.value.slice(0, pos);
+  const after  = input.value.slice(pos);
+
+  const { sepBefore, sepAfter } = buildJunctionSeparators(before, after, text);
+  input.value = before + sepBefore + text + sepAfter + after;
+
+  // カーソルを挿入テキストの直後に移動
+  const newPos = before.length + sepBefore.length + text.length + sepAfter.length;
+  input.setSelectionRange(newPos, newPos);
+
+  // 保存トリガー（input イベントと同じデバウンス処理）
+  input.dispatchEvent(new Event('input'));
+}
+
+/** txt2img プロンプトをスクラッチパッドに読み込む */
+async function readFromTxt2Img() {
+  const target   = els.a1111PromptTarget.value;
+  const textarea = findPromptTextarea(target);
+  if (!textarea) {
+    showToast('⚠️ プロンプト欄が見つかりません');
+    return;
+  }
+
+  const readText = textarea.value;  // as-is: 改行・字下げを含めて変更しない
+  if (!readText) {
+    showToast('⚠️ プロンプトが空です');
+    return;
+  }
+
+  const hasContent = els.scratchpadInput.value.length > 0;
+  if (hasContent) {
+    const choice = await showDteDialog({
+      message: 'スクラッチパッドにテキストがあります',
+      buttons: [
+        { label: 'キャンセル',         value: 'cancel' },
+        { label: 'クリアして読み込む', value: 'clear'  },
+        { label: 'カーソル位置に追加', value: 'insert' },
+      ],
+    });
+    if (choice === 'cancel') return;
+    if (choice === 'clear') {
+      els.scratchpadInput.value = '';
+    }
+    // 'insert' はそのままカーソル位置へ挿入
+  }
+
+  insertAtScratchpadCursor(readText);
+  showToast('✅ プロンプトを読み込みました');
+}
+
+/** スクラッチパッドの内容を txt2img プロンプトに送出する */
+async function sendToTxt2Img() {
+  const target   = els.a1111PromptTarget.value;
+  const textarea = findPromptTextarea(target);
+  if (!textarea) {
+    showToast('⚠️ プロンプト欄が見つかりません');
+    return;
+  }
+
+  if (!els.scratchpadInput.value.trim()) {
+    showToast('⚠️ スクラッチパッドが空です');
+    return;
+  }
+
+  if (textarea.value) {
+    const choice = await showDteDialog({
+      message: 'txt2img のプロンプトを上書きしますか？',
+      buttons: [
+        { label: 'キャンセル',  value: 'cancel'    },
+        { label: '上書きする',  value: 'overwrite' },
+      ],
+    });
+    if (choice !== 'overwrite') return;
+  }
+
+  // Gradio の内部状態に反映させるため input イベントを発火する
+  textarea.value = els.scratchpadInput.value;
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  showToast('✅ プロンプトを送出しました');
+}
+
+/**
+ * スクラッチパッドの内容を整形する。
+ *   - 全体の trim
+ *   - コンマ正規化: \s*,+\s* → ", " （空行はスキップ）
+ * Ctrl-Z で取り消せるよう execCommand('insertText') を使う。
+ */
+function applyFormat(value) {
+  // (\s*,\s*)+ でスペースを挟んだ多重コンマも一括して ", " に置換する
+  // 例: "a , , , b" → "a, b" / "a,,b" → "a, b"
+  return value
+    .split('\n')
+    .map(line => line.trim() === '' ? line : line.replace(/(\s*,\s*)+/g, ', '))
+    .join('\n')
+    .trim();
+}
+
+function formatScratchpad() {
+  const input     = els.scratchpadInput;
+  const formatted = applyFormat(input.value);
+  if (formatted === input.value) return;   // 変化なし → undo スタックを汚さない
+
+  input.focus();
+  input.select();
+  // execCommand は deprecated だが textarea の undo スタックを保持する唯一の手段
+  document.execCommand('insertText', false, formatted);
+}
+
+/** A1111 モード時に呼ばれる: UI を表示してイベントリスナーを登録する */
+function initA1111Mode() {
+  els.a1111Actions.classList.remove('hidden');
+  els.a1111ReadBtn.addEventListener('click', readFromTxt2Img);
+  els.a1111SendBtn.addEventListener('click', sendToTxt2Img);
+}
 
 // Keyboard shortcut: / to focus search
 document.addEventListener('keydown', e => {

@@ -153,6 +153,7 @@ def build_index_html():
     injection = (
         '  <base href="' + ROUTE_PREFIX + '/">\n'
         "  <script>\n"
+        "    window.__DTE_MODE__ = 'a1111';\n"
         "    // A1111 extension: default to light theme on first visit\n"
         "    if (!localStorage.getItem('theme')) {\n"
         "      localStorage.setItem('theme', 'light');\n"

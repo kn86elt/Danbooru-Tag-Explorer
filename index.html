@@ -229,6 +229,10 @@
           <input type="checkbox" id="replace-underscore" />
           <span>_をスペースに変換</span>
         </label>
+        <button id="scratchpad-format-btn" class="btn-icon" title="スクラッチパッドを整形 (Ctrl-Z で取り消し可)">
+          <span class="btn-icon-inner">✏</span>
+          <span class="btn-label">整形</span>
+        </button>
         <button id="scratchpad-copy" class="btn-icon" title="すべてコピー">
           <span class="btn-icon-inner">📋</span>
           <span class="btn-label">まとめてコピー</span>
@@ -239,11 +243,30 @@
         </button>
       </div>
     </div>
+    <!-- A1111 integration bar: hidden in standalone mode, shown by initA1111Mode() -->
+    <div id="a1111-actions" class="a1111-actions hidden">
+      <select id="a1111-prompt-target" class="a1111-select" title="対象プロンプト">
+        <option value="positive">Positive</option>
+        <option value="negative">Negative</option>
+      </select>
+      <button id="a1111-read-btn" class="btn-icon a1111-btn" title="txt2img のプロンプトを読み込む">
+        <span class="btn-label">Read from txt2img</span>
+      </button>
+      <button id="a1111-send-btn" class="btn-icon a1111-btn a1111-send" title="スクラッチパッドの内容を txt2img に送出">
+        <span class="btn-label">Send to txt2img</span>
+      </button>
+    </div>
     <textarea id="scratchpad-input" class="scratchpad-input" placeholder="クリックしたタグがここにストックされます... カンマ区切りで自由に追加・編集できます。" spellcheck="false"></textarea>
   </div>
 
   <!-- Toast -->
   <div id="toast" class="toast" role="alert" aria-live="polite"></div>
+
+  <!-- DTE Dialog (Read/Send 競合確認用) -->
+  <dialog id="dte-dialog" class="dte-dialog">
+    <p id="dte-dialog-message" class="dte-dialog-message"></p>
+    <div id="dte-dialog-buttons" class="dte-dialog-buttons"></div>
+  </dialog>
 
   <!-- Loading overlay -->
   <div id="loading-overlay" class="loading-overlay">
