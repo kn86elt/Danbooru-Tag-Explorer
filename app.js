@@ -1724,6 +1724,7 @@ function toggleTagInScratchpad(name) {
 
   if (allTags.includes(formatted)) {
     // 削除: 行単位で処理し、対象タグが含まれる行だけを変更する
+    const savedLC = getCursorLC(input);
     const newText = text.split('\n').map(line => {
       const parts = line.split(',');
       const newParts = parts.filter(t => t.trim() !== formatted);
@@ -1734,6 +1735,7 @@ function toggleTagInScratchpad(name) {
     }).join('\n');
     input.value = newText;
     input.dispatchEvent(new Event('input'));
+    setCursorLC(input, savedLC);
     showToast(`🗑 ストック削除: ${formatted}`);
   } else {
     // 追加: カーソル位置に挿入
@@ -2316,6 +2318,25 @@ function buildJunctionSeparators(before, after, text) {
   }
 
   return { sepBefore, sepAfter };
+}
+
+/** カーソルの行インデックスと列を返す */
+function getCursorLC(input) {
+  const pos    = input.selectionStart;
+  const before = input.value.slice(0, pos);
+  const lines  = before.split('\n');
+  return { line: lines.length - 1, col: lines[lines.length - 1].length };
+}
+
+/** 指定の行インデックス・列にカーソルを移動する（はみ出しは clamp） */
+function setCursorLC(input, { line, col }) {
+  const lines = input.value.split('\n');
+  const l = Math.min(line, lines.length - 1);
+  const c = Math.min(col,  lines[l].length);
+  let pos = 0;
+  for (let i = 0; i < l; i++) pos += lines[i].length + 1;
+  pos += c;
+  input.setSelectionRange(pos, pos);
 }
 
 /**
