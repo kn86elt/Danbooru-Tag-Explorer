@@ -1777,6 +1777,47 @@ function initScratchpadToggle() {
   });
 }
 
+// ── Scratchpad Resizer ──────────────────────────
+function initScratchpadResizer() {
+  const handle = document.getElementById('scratchpad-resizer');
+  const pad    = document.getElementById('scratchpad');
+  if (!handle || !pad) return;
+
+  // 起動時に保存サイズを復元
+  const saved = parseInt(localStorage.getItem('scratchpadHeight'), 10);
+  if (!isNaN(saved)) pad.style.height = saved + 'px';
+
+  let dragging = false, startY = 0, startH = 0;
+
+  handle.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    dragging = true;
+    startY = e.clientY;
+    startH = pad.offsetHeight;
+    handle.classList.add('dragging');
+    document.body.style.cursor     = 'row-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    // 上にドラッグ → scratchpad が高くなる
+    const delta = e.clientY - startY;
+    const h = Math.max(60, Math.min(600, startH - delta));
+    pad.style.height = h + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('dragging');
+    document.body.style.cursor     = '';
+    document.body.style.userSelect = '';
+    localStorage.setItem('scratchpadHeight', pad.offsetHeight);
+  });
+}
+
 // ── Sidebar Resizer ─────────────────────────────
 function initResizer() {
   let dragging = false, startX = 0, startW = 0;
@@ -2809,4 +2850,5 @@ document.head.appendChild(highlightStyle);
 initResizer();
 initMobileSidebar();
 initScratchpadToggle();
+initScratchpadResizer();
 boot();
