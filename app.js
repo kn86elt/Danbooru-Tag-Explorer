@@ -1742,7 +1742,6 @@ function toggleTagInScratchpad(name) {
     addHistoryStock(name); // ← record in history
   }
 
-  input.scrollTop = input.scrollHeight;
 }
 
 function showToast(msg, duration = 2000) {
@@ -2332,6 +2331,17 @@ async function readFromTxt2Img() {
   }
 
   insertAtScratchpadCursor(readText);
+
+  // 空行3行以上のブロックがあればカーソルをその2行目（先頭）に移動
+  {
+    const val = els.scratchpadInput.value;
+    const idx = val.indexOf('\n\n\n');
+    if (idx !== -1) {
+      const targetPos = idx + 1;
+      els.scratchpadInput.setSelectionRange(targetPos, targetPos);
+    }
+  }
+
   showToast('✅ プロンプトを読み込みました');
 }
 
