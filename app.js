@@ -2335,40 +2335,35 @@ function showDteDialog({ message, buttons, anchorEl = null }) {
 /**
  * スクラッチパッドの before / after と挿入テキスト text から
  * junction に必要なコンマ区切りを計算する。
- * 行をまたいで区切り文字を挿入しないよう、現在行のカーソル前後のみを参照する。
+ * 実際の文字列は変更せず、比較にのみ trim を使う。
  *
- * before の末尾パターン（現在行内のみ）:
+ * before の末尾パターン:
  *   "tag, " → すでに `, ` あり → 追加不要
  *   "tag,"  → コンマのみ → スペースだけ追加
  *   "tag"   → 何もなし  → `, ` を追加
- *   ""      → 行頭      → 追加不要
- * after の先頭パターン（現在行内のみ）:
+ * after の先頭パターン:
  *   ", tag" / ",tag" → コンマあり → 追加不要
  *   "tag"            → なし        → `, ` を追加
  */
 function buildJunctionSeparators(before, after, text) {
-  // 現在行のカーソル前後のみを対象にする（行をまたいだ区切り追加を避ける）
-  const currentLineBefore = before.slice(before.lastIndexOf('\n') + 1);
-  const nlAfterIdx        = after.indexOf('\n');
-  const currentLineAfter  = nlAfterIdx === -1 ? after : after.slice(0, nlAfterIdx);
-
   let sepBefore = '';
-  if (currentLineBefore.length > 0 && !text.startsWith(',')) {
-    const bTrimmed = currentLineBefore.trimEnd();
+  if (before.length > 0 && !text.startsWith(',')) {
+    const bTrimmed = before.trimEnd();
     if (bTrimmed.length === 0) {
-      // 行内カーソル前が空白のみ（行頭含む）→ 区切り不要
+      // before が空白のみ → 区切り不要
     } else if (bTrimmed.endsWith(',')) {
-      sepBefore = currentLineBefore.endsWith(', ') ? '' : ' ';
+      // コンマが末尾にある: `, ` で終わっていればスペース不要、そうでなければ追加
+      sepBefore = before.endsWith(', ') ? '' : ' ';
     } else {
       sepBefore = ', ';
     }
   }
 
   let sepAfter = '';
-  if (currentLineAfter.length > 0 && !text.endsWith(',')) {
-    const aTrimmed = currentLineAfter.trimStart();
+  if (after.length > 0 && !text.endsWith(',')) {
+    const aTrimmed = after.trimStart();
     if (aTrimmed.length === 0) {
-      // 行内カーソル後が空白のみ → 区切り不要
+      // after が空白のみ → 区切り不要
     } else if (aTrimmed.startsWith(',')) {
       // after 側にコンマがある → 追加不要
     } else {
@@ -2408,7 +2403,9 @@ function insertAtScratchpadCursor(text) {
   const before = input.value.slice(0, pos);
   const after  = input.value.slice(pos);
 
-  const { sepBefore, sepAfter } = buildJunctionSeparators(before, after, text);
+  let { sepBefore, sepAfter } = buildJunctionSeparators(before, after, text);
+  // 行頭（pos=0 またはカーソル直前が改行）では前置セパレータを付与しない
+  if (pos === 0 || before.endsWith('\n')) sepBefore = '';
   input.value = before + sepBefore + text + sepAfter + after;
 
   // カーソルを挿入テキストの直後に移動
