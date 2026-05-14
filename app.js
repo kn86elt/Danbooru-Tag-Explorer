@@ -1715,19 +1715,20 @@ function copyToClipboard(text) {
 }
 
 function toggleTagInScratchpad(name) {
-  const formatted = formatTagForExport(name, { withComma: true });
+  const tagText    = formatTagForExport(name);                    // 比較・削除用（カンマなし）
+  const formatted  = formatTagForExport(name, { withComma: true }); // 挿入用（カンマあり）
   const input = els.scratchpadInput;
   const text = input.value;
 
   // タグが含まれているか判定（改行・カンマ両方で分割して全トークンを走査）
   const allTags = text.split(/[\n,]/).map(t => t.trim()).filter(Boolean);
 
-  if (allTags.includes(formatted)) {
+  if (allTags.includes(tagText)) {
     // 削除: 行単位で処理し、対象タグが含まれる行だけを変更する
     const savedLC = getCursorLC(input);
     const newText = text.split('\n').map(line => {
       const parts = line.split(',');
-      const newParts = parts.filter(t => t.trim() !== formatted);
+      const newParts = parts.filter(t => t.trim() !== tagText);
       if (newParts.length === parts.length) return line; // 変化なし → そのまま
       // 変化あり: trimして再結合（その行のみ整形）
       const remaining = newParts.map(t => t.trim()).filter(Boolean);
@@ -1736,11 +1737,11 @@ function toggleTagInScratchpad(name) {
     input.value = newText;
     input.dispatchEvent(new Event('input'));
     setCursorLC(input, savedLC);
-    showToast(`🗑 ストック削除: ${formatted}`);
+    showToast(`🗑 ストック削除: ${tagText}`);
   } else {
     // 追加: カーソル位置に挿入
     insertAtScratchpadCursor(formatted);
-    showToast(`📝 ストック追加: ${formatted}`);
+    showToast(`📝 ストック追加: ${tagText}`);
     addHistoryStock(name); // ← record in history
   }
 
