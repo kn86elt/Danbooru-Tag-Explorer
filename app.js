@@ -2213,6 +2213,23 @@ function getParentRoot() {
   return window.parent.document;
 }
 
+/**
+ * A1111 の指定タブ ("txt2img" / "img2img") に切り替える。
+ * Gradio の .tab-nav 内ボタンをテキストマッチでクリックする。
+ * タブが見つからない場合は何もしない（エラーにしない）。
+ */
+function switchToA1111Tab(tabName) {
+  const root = getParentRoot();
+  const tabNav = root.querySelector('.tab-nav');
+  if (!tabNav) return;
+  for (const btn of tabNav.querySelectorAll('button')) {
+    if (btn.textContent.trim().toLowerCase().startsWith(tabName.toLowerCase())) {
+      btn.click();
+      return;
+    }
+  }
+}
+
 /** positive / negative それぞれの textarea を探す。見つからなければ null を返す。 */
 function findPromptTextarea(target) {
   const SELECTORS = {
@@ -2408,8 +2425,8 @@ async function readFromTxt2Img() {
       message: 'スクラッチパッドにテキストがあります',
       buttons: [
         { label: 'キャンセル',         value: 'cancel' },
-        { label: 'クリアして読み込む', value: 'clear'  },
         { label: 'カーソル位置に追加', value: 'insert' },
+        { label: 'クリアして読み込む', value: 'clear'  },
       ],
       anchorEl: els.a1111ReadBtn,
     });
@@ -2464,6 +2481,7 @@ async function sendToTxt2Img() {
   // Gradio の内部状態に反映させるため input イベントを発火する
   textarea.value = els.scratchpadInput.value;
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  switchToA1111Tab('txt2img');
   showToast('✅ プロンプトを送出しました');
 }
 
