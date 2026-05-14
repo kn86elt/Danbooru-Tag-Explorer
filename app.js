@@ -1715,7 +1715,7 @@ function copyToClipboard(text) {
 }
 
 function toggleTagInScratchpad(name) {
-  const formatted = formatTagForExport(name);
+  const formatted = formatTagForExport(name, { withComma: true });
   const input = els.scratchpadInput;
   const text = input.value;
 
@@ -2360,7 +2360,7 @@ function buildJunctionSeparators(before, after, text) {
   }
 
   let sepAfter = '';
-  if (after.length > 0 && !text.endsWith(',')) {
+  if (after.length > 0 && !text.trimEnd().endsWith(',')) {
     const aTrimmed = after.trimStart();
     if (aTrimmed.length === 0) {
       // after が空白のみ → 区切り不要
