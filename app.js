@@ -2230,15 +2230,21 @@ function findPromptTextarea(target) {
 /**
  * Promise ベースのモーダルダイアログを表示する。
  * @param {object} opts
- * @param {string}   opts.message  - ダイアログ本文
- * @param {Array}    opts.buttons  - [{label, value}] 。先頭がキャンセル相当
+ * @param {string}   opts.message   - ダイアログ本文
+ * @param {Array}    opts.buttons   - [{label, value}] 。先頭がキャンセル相当
+ * @param {Element}  [opts.anchorEl] - 位置の基準にするボタン要素。省略時は中央表示
  * @returns {Promise<string>}  押されたボタンの value。backdrop / ESC は 'cancel' を返す。
  */
-function showDteDialog({ message, buttons }) {
+function showDteDialog({ message, buttons, anchorEl = null }) {
   return new Promise(resolve => {
     const dialog  = els.dteDialog;
     els.dteDialogMessage.textContent = message;
     els.dteDialogButtons.innerHTML   = '';
+
+    // 前回の位置指定をリセット
+    dialog.style.margin = '';
+    dialog.style.top    = '';
+    dialog.style.left   = '';
 
     let resolved = false;
     const cleanup = value => {
@@ -2275,6 +2281,27 @@ function showDteDialog({ message, buttons }) {
     }, { once: true });
 
     dialog.showModal();
+
+    // showModal() 後にレイアウト済みサイズが確定するのでアンカー位置へ移動
+    if (anchorEl) {
+      const btnRect = anchorEl.getBoundingClientRect();
+      const dlgRect = dialog.getBoundingClientRect();
+      const gap     = 6;
+
+      // ダイアログ下辺をボタン上辺の少し上に合わせる
+      let top  = btnRect.top - dlgRect.height - gap;
+      // ボタン中央を基準に水平配置
+      let left = btnRect.left + btnRect.width / 2 - dlgRect.width / 2;
+
+      // ビューポートからはみ出さないようクランプ
+      const pad = 8;
+      top  = Math.max(pad, Math.min(top,  window.innerHeight - dlgRect.height - pad));
+      left = Math.max(pad, Math.min(left, window.innerWidth  - dlgRect.width  - pad));
+
+      dialog.style.margin = '0';
+      dialog.style.top    = `${top}px`;
+      dialog.style.left   = `${left}px`;
+    }
   });
 }
 
@@ -2384,6 +2411,7 @@ async function readFromTxt2Img() {
         { label: 'クリアして読み込む', value: 'clear'  },
         { label: 'カーソル位置に追加', value: 'insert' },
       ],
+      anchorEl: els.a1111ReadBtn,
     });
     if (choice === 'cancel') return;
     if (choice === 'clear') {
@@ -2428,6 +2456,7 @@ async function sendToTxt2Img() {
         { label: 'キャンセル',  value: 'cancel'    },
         { label: '上書きする',  value: 'overwrite' },
       ],
+      anchorEl: els.a1111SendBtn,
     });
     if (choice !== 'overwrite') return;
   }
