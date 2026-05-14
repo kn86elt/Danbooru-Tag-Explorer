@@ -1427,6 +1427,7 @@ body {
 
 /* Send ボタンはアクセントカラーで区別 */
 .a1111-send {
+  position: relative;
   border-color: rgba(138,123,248,0.35);
   color: var(--accent);
 }
@@ -1434,6 +1435,18 @@ body {
   border-color: var(--accent);
   background: var(--accent-dim);
   color: var(--accent);
+}
+/* 変更マーカー: Read from / Send to と非同期な状態を赤丸で表示 */
+.a1111-send.has-changes::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e55;
+  pointer-events: none;
 }
 
 /* ---------- DTE Dialog ---------- */

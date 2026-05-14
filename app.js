@@ -2200,6 +2200,16 @@ els.scratchpadFormatBtn?.addEventListener('click', formatScratchpad);
 
 // ── A1111 txt2img Integration ────────────────────────────────────────────────
 
+// null = 未同期（初期状態）、string = 最後に同期した時点のスクラッチパッド内容
+let a1111SyncedContent = null;
+
+/** Send ボタンの変更マーカー（赤丸）を同期状態に合わせて更新する */
+function updateSendBtnDirty() {
+  const isDirty = a1111SyncedContent !== null &&
+                  els.scratchpadInput.value !== a1111SyncedContent;
+  els.a1111SendBtn.classList.toggle('has-changes', isDirty);
+}
+
 /**
  * A1111 / reForge / Forge は同一オリジン (localhost) なので window.parent.document に
  * 直接アクセスできる。旧世代 A1111 は Gradio が shadow DOM を使うため gradioApp() を
@@ -2325,35 +2335,40 @@ function showDteDialog({ message, buttons, anchorEl = null }) {
 /**
  * スクラッチパッドの before / after と挿入テキスト text から
  * junction に必要なコンマ区切りを計算する。
- * 実際の文字列は変更せず、比較にのみ trim を使う。
+ * 行をまたいで区切り文字を挿入しないよう、現在行のカーソル前後のみを参照する。
  *
- * before の末尾パターン:
+ * before の末尾パターン（現在行内のみ）:
  *   "tag, " → すでに `, ` あり → 追加不要
  *   "tag,"  → コンマのみ → スペースだけ追加
  *   "tag"   → 何もなし  → `, ` を追加
- * after の先頭パターン:
+ *   ""      → 行頭      → 追加不要
+ * after の先頭パターン（現在行内のみ）:
  *   ", tag" / ",tag" → コンマあり → 追加不要
  *   "tag"            → なし        → `, ` を追加
  */
 function buildJunctionSeparators(before, after, text) {
+  // 現在行のカーソル前後のみを対象にする（行をまたいだ区切り追加を避ける）
+  const currentLineBefore = before.slice(before.lastIndexOf('\n') + 1);
+  const nlAfterIdx        = after.indexOf('\n');
+  const currentLineAfter  = nlAfterIdx === -1 ? after : after.slice(0, nlAfterIdx);
+
   let sepBefore = '';
-  if (before.length > 0 && !text.startsWith(',')) {
-    const bTrimmed = before.trimEnd();
+  if (currentLineBefore.length > 0 && !text.startsWith(',')) {
+    const bTrimmed = currentLineBefore.trimEnd();
     if (bTrimmed.length === 0) {
-      // before が空白のみ → 区切り不要
+      // 行内カーソル前が空白のみ（行頭含む）→ 区切り不要
     } else if (bTrimmed.endsWith(',')) {
-      // コンマが末尾にある: `, ` で終わっていればスペース不要、そうでなければ追加
-      sepBefore = before.endsWith(', ') ? '' : ' ';
+      sepBefore = currentLineBefore.endsWith(', ') ? '' : ' ';
     } else {
       sepBefore = ', ';
     }
   }
 
   let sepAfter = '';
-  if (after.length > 0 && !text.endsWith(',')) {
-    const aTrimmed = after.trimStart();
+  if (currentLineAfter.length > 0 && !text.endsWith(',')) {
+    const aTrimmed = currentLineAfter.trimStart();
     if (aTrimmed.length === 0) {
-      // after が空白のみ → 区切り不要
+      // 行内カーソル後が空白のみ → 区切り不要
     } else if (aTrimmed.startsWith(',')) {
       // after 側にコンマがある → 追加不要
     } else {
@@ -2449,6 +2464,8 @@ async function readFromTxt2Img() {
     }
   }
 
+  a1111SyncedContent = els.scratchpadInput.value;
+  updateSendBtnDirty();
   showToast('✅ プロンプトを読み込みました');
 }
 
@@ -2481,6 +2498,8 @@ async function sendToTxt2Img() {
   // Gradio の内部状態に反映させるため input イベントを発火する
   textarea.value = els.scratchpadInput.value;
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  a1111SyncedContent = els.scratchpadInput.value;
+  updateSendBtnDirty();
   switchToA1111Tab('txt2img');
   showToast('✅ プロンプトを送出しました');
 }
@@ -2517,6 +2536,7 @@ function initA1111Mode() {
   els.a1111Actions.classList.remove('hidden');
   els.a1111ReadBtn.addEventListener('click', readFromTxt2Img);
   els.a1111SendBtn.addEventListener('click', sendToTxt2Img);
+  els.scratchpadInput.addEventListener('input', updateSendBtnDirty);
 }
 
 // Keyboard shortcut: / to focus search
