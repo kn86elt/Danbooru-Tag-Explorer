@@ -1691,8 +1691,8 @@ function handleSearch(query, isAI = false) {
 
 let _llmSearchAbort = null;
 
-// LLM出力を解析して英語キーワード配列を返す。
-// "日本語: english keyword" 形式のペア出力と、従来のカンマ区切り形式の両方に対応。
+// LLM出力を {ja, en} ペア配列に解析する。
+// "日本語: english keyword" 形式と従来のカンマ区切り形式の両方に対応。
 function parseLlmOutput(raw) {
   const unescaped = raw.replace(/\\_/g, '_');
   const lines = unescaped.split('\n')
@@ -1700,19 +1700,46 @@ function parseLlmOutput(raw) {
     .filter(Boolean);
   const pairLines = lines.filter(l => l.includes(':'));
   if (pairLines.length >= Math.ceil(lines.length / 2)) {
-    // ペア形式: コロン以降を英語キーワードとして抽出
-    const terms = [];
+    const pairs = [];
     for (const line of pairLines) {
-      const en = line.slice(line.indexOf(':') + 1).trim();
-      en.split(',').map(t => t.trim()).filter(Boolean).forEach(t => terms.push(t));
+      const colonIdx = line.indexOf(':');
+      const ja = line.slice(0, colonIdx).trim();
+      line.slice(colonIdx + 1).split(',').map(t => t.trim()).filter(Boolean)
+        .forEach(en => pairs.push({ ja, en }));
     }
-    return terms;
+    return pairs;
   }
-  // フォールバック: カンマ/改行区切りのタグ列
-  return unescaped.split(/[,\n]/).map(t => t.trim()).filter(Boolean);
+  // フォールバック: カンマ/改行区切りの英語タグ列
+  return unescaped.split(/[,\n]/).map(t => t.trim()).filter(Boolean)
+    .map(en => ({ ja: '', en }));
 }
 
-// 英語キーワードをDanbooruタグ名に解決する。
+// state.translations (tagName→ja) の逆引きMap (ja→[tagName,...]) をキャッシュ構築。
+let _jaReverseMap = null;
+function getJaReverseMap() {
+  if (_jaReverseMap) return _jaReverseMap;
+  _jaReverseMap = new Map();
+  for (const [tagName, jaText] of state.translations) {
+    const key = jaText.trim();
+    if (!_jaReverseMap.has(key)) _jaReverseMap.set(key, []);
+    _jaReverseMap.get(key).push(tagName);
+  }
+  return _jaReverseMap;
+}
+
+// 日本語テキストでDanbooruタグを逆引きする（投稿数最大のものを返す）。
+function resolveByJa(jaWord) {
+  if (!jaWord) return null;
+  const reverseMap = getJaReverseMap();
+  const candidates = reverseMap.get(jaWord.trim());
+  if (!candidates || candidates.length === 0) return null;
+  return candidates.reduce((best, name) => {
+    const c = state.tagMeta.get(name)?.count ?? 0;
+    return c > (state.tagMeta.get(best)?.count ?? 0) ? name : best;
+  });
+}
+
+// 英語キーワードをDanbooruタグ名に解決する（日本語逆引きが失敗した場合のフォールバック）。
 // 1. 完全一致 (spaces→underscores)
 // 2. 全トークン一致の中で最高投稿数のタグ
 // 3. フォールバック: アンダースコア正規化そのまま
@@ -1733,13 +1760,18 @@ function resolveToDbTag(enTerm) {
   return underscored;
 }
 
+// ペアを解決: 日本語逆引き優先、失敗時は英語から解決。
+function resolvePair({ ja, en }) {
+  return resolveByJa(ja) ?? resolveToDbTag(en);
+}
+
 // LLM出力を正規化してdisplay用文字列に変換:
-//   ペア解析 → Danbooruタグ解決 → replace-underscore適用 → 末尾カンマ付加
+//   ペア解析 → 日本語逆引き/英語解決 → replace-underscore適用 → 末尾カンマ付加
 function normalizeLlmTags(raw) {
-  const terms = parseLlmOutput(raw);
+  const pairs = parseLlmOutput(raw);
   const replaceUs = els.replaceUnderscore?.checked ?? false;
-  const tags = terms.map(term => {
-    const resolved = resolveToDbTag(term);
+  const tags = pairs.map(pair => {
+    const resolved = resolvePair(pair);
     return replaceUs ? resolved.replace(/_/g, ' ') : resolved;
   });
   return tags.length ? tags.join(', ') + ',' : '';
@@ -1759,8 +1791,7 @@ async function triggerLlmSearch(query) {
     });
     const data = await res.json();
     if (!data.tags) return;
-    const terms = parseLlmOutput(data.tags);
-    const translated = terms.map(resolveToDbTag).join(' ');
+    const translated = parseLlmOutput(data.tags).map(resolvePair).join(' ');
     handleSearch(translated, true);
   } catch (e) {
     if (e.name !== 'AbortError') {} // silent fallback
