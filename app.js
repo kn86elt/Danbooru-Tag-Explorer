@@ -1691,6 +1691,16 @@ function handleSearch(query, isAI = false) {
 
 let _llmSearchAbort = null;
 
+// LLM出力のタグを正規化:
+//   1. バックスラッシュエスケープ除去 (\_ → _)
+//   2. アンダーバー→スペース変換 (ice_cream → ice cream)
+//   3. 末尾にカンマ付加
+function normalizeLlmTags(raw) {
+  const unescaped = raw.replace(/\\(.)/g, '$1');
+  const tags = unescaped.split(',').map(t => t.trim().replace(/_/g, ' ')).filter(Boolean);
+  return tags.length ? tags.join(', ') + ',' : '';
+}
+
 async function triggerLlmSearch(query) {
   if (_llmSearchAbort) _llmSearchAbort.abort();
   _llmSearchAbort = new AbortController();
@@ -1705,7 +1715,8 @@ async function triggerLlmSearch(query) {
     });
     const data = await res.json();
     if (!data.tags) return;
-    const translated = data.tags.split(',').map(t => t.trim()).join(' ');
+    const unescaped = data.tags.replace(/\\(.)/g, '$1');
+    const translated = unescaped.split(',').map(t => t.trim()).join(' ');
     handleSearch(translated, true);
   } catch (e) {
     if (e.name !== 'AbortError') {} // silent fallback
@@ -2246,7 +2257,7 @@ function initLlmConvert() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       if (els.llmTagOutput) {
-        els.llmTagOutput.value = data.tags;
+        els.llmTagOutput.value = normalizeLlmTags(data.tags);
         els.llmTagOutput.dispatchEvent(new Event('input'));
       }
     } catch (e) {
