@@ -367,8 +367,7 @@ const els = {
   llmPort:              $('llm-port'),
   llmPath:              $('llm-path'),
   llmApiKey:            $('llm-apikey'),
-  llmModelInput:        $('llm-model'),
-  llmModelDatalist:     $('llm-model-datalist'),
+  llmModelSelect:       $('llm-model-select'),
   llmFetchModelsBtn:    $('llm-fetch-models-btn'),
   llmModelNote:         $('llm-model-note'),
   llmUnloadRow:         $('llm-unload-row'),
@@ -2048,6 +2047,23 @@ function initSettingsModal() {
     els.llmUnloadRow?.classList.toggle('hidden', !preset?.supportsUnload);
   }
 
+  function populateModelSelect(models, selectedValue) {
+    const sel = els.llmModelSelect;
+    if (!sel) return;
+    sel.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '-- モデルを選択 --';
+    sel.appendChild(placeholder);
+    models.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      sel.appendChild(opt);
+    });
+    sel.value = selectedValue;
+  }
+
   function openSettings() {
     const c = state.llmConfig;
     if (els.llmPresetSelect) els.llmPresetSelect.value = c.preset || 'ollama';
@@ -2055,7 +2071,7 @@ function initSettingsModal() {
     if (els.llmPort)         els.llmPort.value         = c.port   || 11434;
     if (els.llmPath)         els.llmPath.value         = c.path   || '/v1';
     if (els.llmApiKey)       els.llmApiKey.value       = c.apiKey || '';
-    if (els.llmModelInput)   els.llmModelInput.value   = c.model  || '';
+    if (els.llmModelSelect)  populateModelSelect([...(c.model ? [c.model] : [])], c.model || '');
     updateUnloadVisibility();
     // CSV フィールド
     const isA1111 = _mode === 'a1111';
@@ -2093,18 +2109,9 @@ function initSettingsModal() {
     try {
       const data = await fetch('api/llm/models' + llmQueryParams()).then(r => r.json());
       if (data.error) throw new Error(data.error);
-      if (els.llmModelDatalist) {
-        els.llmModelDatalist.innerHTML = '';
-        data.models.forEach(m => {
-          const opt = document.createElement('option');
-          opt.value = m;
-          els.llmModelDatalist.appendChild(opt);
-        });
-      }
+      const currentModel = els.llmModelSelect?.value || state.llmConfig.model || '';
+      populateModelSelect(data.models, currentModel);
       setNote(els.llmModelNote, `${data.models.length} 件取得`, 'ok');
-      if (els.llmModelInput && !els.llmModelInput.value && data.models.length > 0) {
-        els.llmModelInput.value = data.models[0];
-      }
     } catch (e) {
       setNote(els.llmModelNote, `取得失敗: ${e.message}`, 'error');
     }
@@ -2142,7 +2149,7 @@ function initSettingsModal() {
       port:    parseInt(els.llmPort?.value) || 11434,
       path:    els.llmPath?.value.trim()  || '/v1',
       apiKey:  els.llmApiKey?.value.trim() || '',
-      model:   els.llmModelInput?.value.trim() || '',
+      model:   els.llmModelSelect?.value || '',
       timeout: state.llmConfig.timeout || 30,
     };
     const body = { llm };

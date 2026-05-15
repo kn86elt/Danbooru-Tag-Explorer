@@ -108,11 +108,9 @@
             <input id="llm-apikey" class="settings-input" placeholder="不要な場合は空欄" spellcheck="false">
           </div>
           <div class="settings-field">
-            <label class="settings-label" for="llm-model">モデル</label>
+            <label class="settings-label" for="llm-model-select">モデル</label>
             <div class="settings-row">
-              <input id="llm-model" class="settings-input" list="llm-model-datalist"
-                     placeholder="例: qwen2.5:3b" spellcheck="false">
-              <datalist id="llm-model-datalist"></datalist>
+              <select id="llm-model-select" class="settings-select settings-model-select"></select>
               <button id="llm-fetch-models-btn" class="btn-icon" title="サーバからモデル一覧を取得">🔄</button>
             </div>
             <div id="llm-model-note" class="settings-note"></div>
