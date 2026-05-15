@@ -1715,6 +1715,9 @@ function copyToClipboard(text) {
   }
 }
 
+// ソフト削除されたタグ: rawName → textarea 上のトークン文字列
+const _softDeleted = new Map();
+
 function softDeleteTag(rawName, token) {
   toggleTagInScratchpad(rawName);   // textarea から削除（synthetic input を発火）
   _softDeleted.set(rawName, token);
@@ -2812,9 +2815,6 @@ const wikiPreviewEl = (() => {
 })();
 
 const _wikiInfoCache = new Map();
-
-// ソフト削除されたタグ: rawName → textarea 上のトークン文字列
-const _softDeleted = new Map();
 
 // ── Wiki DText レンダラー（モーダル用・タグリンク付き）────
 function renderWikiBody(text, container) {
