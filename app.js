@@ -287,6 +287,8 @@ const els = {
   searchOverlay:   $('search-results-overlay'),
   searchList:      $('search-results-list'),
   searchCount:     $('search-results-count'),
+  searchAiBadge:   $('search-ai-badge'),
+  searchEnterHint: $('search-enter-hint'),
   treeNav:         $('tree-nav'),
   expandAll:       $('expand-all'),
   collapseAll:     $('collapse-all'),
@@ -330,7 +332,6 @@ const els = {
   sidebarCloseBtn: $('sidebar-close-btn'),
   cardSizeWrap:       $('card-size-wrap'),
   cardSizeSlider:     $('card-size-slider'),
-  searchEnterHint:    $('search-enter-hint'),
   cardContextMenu:    $('card-context-menu'),
   ctxDanbooruPosts:   $('ctx-danbooru-posts'),
   ctxDetail:          $('ctx-detail'),
@@ -1598,7 +1599,7 @@ function getRelatedTags(tagName) {
   return Array.from(set).sort((a, b) => getCount(b) - getCount(a)).slice(0, 100);
 }
 
-function handleSearch(query) {
+function handleSearch(query, isAI = false) {
   query = query.trim();
   if (!query) { els.searchOverlay.classList.add('hidden'); return; }
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -1681,7 +1682,34 @@ function handleSearch(query) {
   });
 
   els.searchList.appendChild(frag);
+  els.searchAiBadge?.classList.toggle('hidden', !isAI);
   els.searchOverlay.classList.remove('hidden');
+}
+
+let _llmSearchAbort = null;
+
+async function triggerLlmSearch(query) {
+  if (_llmSearchAbort) _llmSearchAbort.abort();
+  _llmSearchAbort = new AbortController();
+  const hint = els.searchEnterHint;
+  if (hint) hint.textContent = '🤖 翻訳中...';
+  try {
+    const res = await fetch('api/ai-translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: query }),
+      signal: _llmSearchAbort.signal,
+    });
+    const data = await res.json();
+    if (!data.tags) return;
+    const translated = data.tags.split(',').map(t => t.trim()).join(' ');
+    handleSearch(translated, true);
+  } catch (e) {
+    if (e.name !== 'AbortError') {} // silent fallback
+  } finally {
+    if (hint) hint.textContent = '↵ Enter で一覧表示';
+    _llmSearchAbort = null;
+  }
 }
 
 function highlightMatch(text, tokens) {
@@ -2195,6 +2223,37 @@ function initScratchpadTabs() {
   });
 }
 
+function initLlmConvert() {
+  const btn = els.llmConvertBtn;
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const text = els.llmJpInput?.value.trim();
+    if (!text) { showToast('日本語テキストを入力してください'); return; }
+    const label = btn.querySelector('.btn-label');
+    const origText = label?.textContent ?? '変換';
+    btn.disabled = true;
+    if (label) label.textContent = '変換中...';
+    try {
+      const res = await fetch('api/ai-translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      if (els.llmTagOutput) {
+        els.llmTagOutput.value = data.tags;
+        els.llmTagOutput.dispatchEvent(new Event('input'));
+      }
+    } catch (e) {
+      showToast(`変換失敗: ${e.message}`);
+    } finally {
+      btn.disabled = false;
+      if (label) label.textContent = origText;
+    }
+  });
+}
+
 function initScratchpadToggle() {
   const btn = els.scratchpadToggle;
   const pad = $('scratchpad');
@@ -2504,13 +2563,33 @@ els.minPostFilter.addEventListener('input', () => {
 });
 
 // Search
+let _llmSearchDebounce = null;
 els.globalSearch.addEventListener('input', e => {
+  const val = e.target.value;
+  const trimmed = val.trim();
+
+  // Cancel any pending LLM search
+  clearTimeout(_llmSearchDebounce);
+  if (_llmSearchAbort) { _llmSearchAbort.abort(); _llmSearchAbort = null; }
+
+  // Normal search (150ms)
   clearTimeout(state.searchDebounce);
-  state.searchDebounce = setTimeout(() => handleSearch(e.target.value), 150);
+  state.searchDebounce = setTimeout(() => handleSearch(val), 150);
+
+  // Japanese LLM auto-translate: 800ms debounce after last keystroke
+  if (trimmed && /[぀-ヿ一-龯]/.test(trimmed) && state.llmConfig?.model) {
+    _llmSearchDebounce = setTimeout(() => {
+      const count = parseInt(els.searchCount?.textContent, 10) || 0;
+      if (count === 0) triggerLlmSearch(trimmed);
+    }, 800);
+  }
 });
 els.searchClear.addEventListener('click', () => {
   els.globalSearch.value = '';
   els.searchOverlay.classList.add('hidden');
+  els.searchAiBadge?.classList.add('hidden');
+  clearTimeout(_llmSearchDebounce);
+  if (_llmSearchAbort) { _llmSearchAbort.abort(); _llmSearchAbort = null; }
 });
 document.addEventListener('click', e => {
   if (!els.searchOverlay.contains(e.target) && e.target !== els.globalSearch) {
@@ -3395,6 +3474,7 @@ initResizer();
 initMobileSidebar();
 initSettingsModal();
 initScratchpadTabs();
+initLlmConvert();
 initScratchpadToggle();
 initScratchpadResizer();
 boot();

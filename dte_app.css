@@ -316,6 +316,16 @@ body {
   border-color: var(--accent);
   color: var(--accent);
 }
+.search-ai-badge {
+  display: inline-block;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
 .search-results-list {
   list-style: none;
   overflow-y: auto;

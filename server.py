@@ -39,10 +39,13 @@ def _http_get(url, timeout=5):
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
-def _http_post(url, body=None, timeout=10):
+def _http_post(url, body=None, timeout=10, extra_headers=None):
     data = json.dumps(body or {}).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if extra_headers:
+        headers.update(extra_headers)
     req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+        url, data=data, headers=headers, method="POST"
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
@@ -195,6 +198,44 @@ def api_llm_unload():
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "message": str(e)})
+
+
+# ── API: /api/ai-translate ────────────────────────────────────────────────────
+@app.route("/api/ai-translate", methods=["POST"])
+def api_ai_translate():
+    body    = request.get_json(silent=True) or {}
+    text    = (body.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    llm     = load_settings().get("llm", {})
+    host    = (llm.get("host")    or "localhost").strip()
+    port    = int(llm.get("port") or 11434)
+    path    = (llm.get("path")    or "/v1").rstrip("/")
+    api_key = (llm.get("apiKey")  or "").strip()
+    model   = (llm.get("model")   or "").strip()
+    timeout = int(llm.get("timeout") or 30)
+    if not model:
+        return jsonify({"error": "モデルが設定されていません"}), 400
+    url = f"http://{host}:{port}{path}/chat/completions"
+    extra_headers = {}
+    if api_key and api_key.lower() != "none":
+        extra_headers["Authorization"] = f"Bearer {api_key}"
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "You convert Japanese text to Danbooru image tags.\nOutput only comma-separated English tags in snake_case. No explanation."},
+            {"role": "user",   "content": text},
+        ],
+        "temperature": 0.3,
+        "max_tokens":  256,
+        "stream":      False,
+    }
+    try:
+        result = _http_post(url, payload, timeout=timeout, extra_headers=extra_headers)
+        tags = result["choices"][0]["message"]["content"].strip()
+        return jsonify({"tags": tags})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ── API: /api/favorites ───────────────────────────────────────────────────────
