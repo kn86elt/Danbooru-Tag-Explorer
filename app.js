@@ -1692,12 +1692,16 @@ function handleSearch(query, isAI = false) {
 let _llmSearchAbort = null;
 
 // LLM出力のタグを正規化:
-//   1. バックスラッシュエスケープ除去 (\_ → _)
-//   2. アンダーバー→スペース変換 (ice_cream → ice cream)
+//   1. バックスラッシュエスケープ除去 (\_ → _) — 常時
+//   2. アンダーバー→スペース変換 — replace-underscore チェック時のみ
 //   3. 末尾にカンマ付加
 function normalizeLlmTags(raw) {
   const unescaped = raw.replace(/\\(.)/g, '$1');
-  const tags = unescaped.split(',').map(t => t.trim().replace(/_/g, ' ')).filter(Boolean);
+  const replaceUs = els.replaceUnderscore?.checked ?? false;
+  const tags = unescaped.split(',').map(t => {
+    const trimmed = t.trim();
+    return replaceUs ? trimmed.replace(/_/g, ' ') : trimmed;
+  }).filter(Boolean);
   return tags.length ? tags.join(', ') + ',' : '';
 }
 
