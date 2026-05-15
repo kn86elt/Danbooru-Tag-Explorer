@@ -1333,6 +1333,54 @@ body {
   color: #e55;
   background: var(--surface3);
 }
+
+/* ---- Scratchpad tabs ---- */
+.scratchpad-tabs {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.scratchpad-tab {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px 4px 0 0;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--text-dim);
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.scratchpad-tab:hover {
+  color: var(--text);
+  background: var(--surface3);
+}
+.scratchpad-tab.active {
+  color: var(--accent);
+  border-color: var(--border);
+  border-bottom-color: var(--surface2);
+  background: var(--surface2);
+  font-weight: 500;
+}
+
+/* ---- Scratchpad tab panels ---- */
+.scratchpad-tab-panel {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+.scratchpad-tab-panel.hidden {
+  display: none;
+}
+
+/* ---- LLM pane textareas ---- */
+.llm-jp-input {
+  border-right: 1px solid var(--border);
+}
+.llm-tag-output {
+  border-right: 1px solid var(--border);
+}
+
 .scratchpad-tag-deleted .scratchpad-tag-name {
   text-decoration: line-through;
   color: var(--text-dim);
@@ -1465,7 +1513,10 @@ body {
 .scratchpad.collapsed {
   height: 36px !important;
 }
-.scratchpad.collapsed .scratchpad-body {
+.scratchpad.collapsed .scratchpad-tab-panel {
+  display: none;
+}
+.scratchpad.collapsed .scratchpad-tabs {
   display: none;
 }
 .scratchpad.collapsed .scratchpad-actions {

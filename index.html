@@ -220,6 +220,11 @@
     <div id="scratchpad-resizer" class="scratchpad-resizer"></div>
     <div class="scratchpad-header">
       <button id="scratchpad-toggle" class="scratchpad-toggle-btn" title="スクラッチパッドを折りたたむ" aria-label="スクラッチパッド折りたたみ">▼</button>
+      <!-- Tab switcher -->
+      <div class="scratchpad-tabs">
+        <button class="scratchpad-tab active" data-tab="prompt">プロンプト編集</button>
+        <button class="scratchpad-tab" data-tab="llm">LLM連携(β)</button>
+      </div>
       <!-- A1111 integration: hidden in standalone mode, shown by initA1111Mode() -->
       <div id="a1111-actions" class="a1111-actions hidden">
         <select id="a1111-prompt-target" class="a1111-select" title="対象プロンプト">
@@ -234,6 +239,10 @@
         </button>
       </div>
       <div class="scratchpad-actions">
+        <button id="llm-convert-btn" class="btn-icon hidden" title="LLMでタグに変換（未実装）" disabled>
+          <span class="btn-icon-inner">→</span>
+          <span class="btn-label">変換</span>
+        </button>
         <label class="toggle-label" style="margin-right: 12px; font-size: 11px;">
           <input type="checkbox" id="append-comma" checked />
           <span>コピーするタグにコンマを付加</span>
@@ -256,9 +265,20 @@
         </button>
       </div>
     </div>
-    <div class="scratchpad-body">
-      <textarea id="scratchpad-input" class="scratchpad-input" placeholder="クリックしたタグがここにストックされます... カンマ区切りで自由に追加・編集できます。" spellcheck="false"></textarea>
-      <div id="scratchpad-tag-list" class="scratchpad-tag-list"></div>
+    <!-- Tab: プロンプト編集 -->
+    <div id="tab-panel-prompt" class="scratchpad-tab-panel">
+      <div class="scratchpad-body">
+        <textarea id="scratchpad-input" class="scratchpad-input" placeholder="クリックしたタグがここにストックされます... カンマ区切りで自由に追加・編集できます。" spellcheck="false"></textarea>
+        <div id="scratchpad-tag-list" class="scratchpad-tag-list"></div>
+      </div>
+    </div>
+    <!-- Tab: LLM連携(β) -->
+    <div id="tab-panel-llm" class="scratchpad-tab-panel hidden">
+      <div class="scratchpad-body">
+        <textarea id="llm-jp-input" class="scratchpad-input llm-jp-input" placeholder="日本語でメモ・説明文を入力... 例）青い髪の女の子、笑顔、海辺" spellcheck="false"></textarea>
+        <textarea id="llm-tag-output" class="scratchpad-input llm-tag-output" placeholder="変換されたタグが表示されます..." spellcheck="false"></textarea>
+        <div id="llm-tag-list" class="scratchpad-tag-list"></div>
+      </div>
     </div>
   </div>
 

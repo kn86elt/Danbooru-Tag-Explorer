@@ -344,6 +344,12 @@ const els = {
   a1111PromptTarget:   $('a1111-prompt-target'),
   scratchpadFormatBtn: $('scratchpad-format-btn'),
   scratchpadTagList:   $('scratchpad-tag-list'),
+  tabPanelPrompt: $('tab-panel-prompt'),
+  tabPanelLlm:    $('tab-panel-llm'),
+  llmJpInput:     $('llm-jp-input'),
+  llmTagOutput:   $('llm-tag-output'),
+  llmTagList:     $('llm-tag-list'),
+  llmConvertBtn:  $('llm-convert-btn'),
   dteDialog:           $('dte-dialog'),
   dteDialogMessage:    $('dte-dialog-message'),
   dteDialogButtons:    $('dte-dialog-buttons'),
@@ -1780,8 +1786,8 @@ function permanentDeleteTag(rawName) {
   renderScratchpadTagList();
 }
 
-function parseScratchpadTags() {
-  return els.scratchpadInput.value
+function parseTags(inputEl) {
+  return (inputEl?.value ?? '')
     .split(/[\n,]/)
     .map(t => t.trim())
     .filter(Boolean)
@@ -1794,6 +1800,10 @@ function parseScratchpadTags() {
       const known = state.tagMeta.has(normalized);
       return { token, rawName: known ? normalized : token, known };
     });
+}
+
+function parseScratchpadTags() {
+  return parseTags(els.scratchpadInput);
 }
 
 function createTagListItem(token, rawName, known, softDeleted) {
@@ -1867,6 +1877,62 @@ function renderScratchpadTagList() {
   }
 }
 
+function createLlmTagListItem(token, rawName, known) {
+  const item = document.createElement('div');
+  item.className = 'scratchpad-tag-item';
+
+  const nameEl = document.createElement('span');
+  nameEl.className = 'scratchpad-tag-name' + (!known ? ' scratchpad-tag-unknown' : '');
+  nameEl.textContent = token;
+  if (known) nameEl.title = rawName;
+  nameEl.addEventListener('click', () => {
+    openTagDetail(rawName, state.tagNodes.get(rawName)?.breadcrumb);
+  });
+  if (!isCoarsePointer()) {
+    nameEl.addEventListener('mouseenter', () => {
+      const rect = nameEl.getBoundingClientRect();
+      showWikiPreview(null, { name: rawName }, state.tagMeta.get(rawName), {
+        fixedPos: {
+          x: Math.max(8, rect.left - 348),
+          y: Math.min(rect.top, window.innerHeight - 260),
+        },
+      });
+    });
+    nameEl.addEventListener('mouseleave', () => hideWikiPreview());
+  }
+
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'scratchpad-tag-remove';
+  removeBtn.textContent = '×';
+  removeBtn.title = '削除';
+  removeBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    const input = els.llmTagOutput;
+    const newText = input.value.split('\n').map(line => {
+      const parts = line.split(',');
+      const newParts = parts.filter(p => p.trim() !== token);
+      if (newParts.length === parts.length) return line;
+      const remaining = newParts.map(p => p.trim()).filter(Boolean);
+      return remaining.length > 0 ? remaining.join(', ') + ', ' : '';
+    }).join('\n');
+    input.value = newText;
+    input.dispatchEvent(new Event('input'));
+  });
+
+  item.appendChild(nameEl);
+  item.appendChild(removeBtn);
+  return item;
+}
+
+function renderLlmTagList() {
+  const list = els.llmTagList;
+  if (!list) return;
+  list.innerHTML = '';
+  for (const { token, rawName, known } of parseTags(els.llmTagOutput)) {
+    list.appendChild(createLlmTagListItem(token, rawName, known));
+  }
+}
+
 function toggleTagInScratchpad(name) {
   const tagText    = formatTagForExport(name);                    // 比較・削除用（カンマなし）
   const formatted  = formatTagForExport(name, { withComma: true }); // 挿入用（カンマあり）
@@ -1909,6 +1975,21 @@ function showToast(msg, duration = 2000) {
 
 // ── Scratchpad collapse ─────────────────────────
 let scratchpadExpanded = true;
+
+function initScratchpadTabs() {
+  const tabs = document.querySelectorAll('.scratchpad-tab');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.tab;
+      tabs.forEach(t => t.classList.toggle('active', t === tab));
+      els.tabPanelPrompt?.classList.toggle('hidden', target !== 'prompt');
+      els.tabPanelLlm?.classList.toggle('hidden', target !== 'llm');
+      const promptOnly = [els.scratchpadFormatBtn, els.scratchpadCopy, els.scratchpadClear];
+      promptOnly.forEach(el => el?.classList.toggle('hidden', target !== 'prompt'));
+      els.llmConvertBtn?.classList.toggle('hidden', target !== 'llm');
+    });
+  });
+}
 
 function initScratchpadToggle() {
   const btn = els.scratchpadToggle;
@@ -2355,6 +2436,8 @@ els.scratchpadInput.addEventListener('input', (e) => {
   }, 500);
   renderScratchpadTagList();
 });
+
+els.llmTagOutput?.addEventListener('input', renderLlmTagList);
 
 els.scratchpadFormatBtn?.addEventListener('click', formatScratchpad);
 
@@ -3106,6 +3189,7 @@ document.head.appendChild(highlightStyle);
 // Init
 initResizer();
 initMobileSidebar();
+initScratchpadTabs();
 initScratchpadToggle();
 initScratchpadResizer();
 boot();
