@@ -1728,15 +1728,44 @@ function softDeleteTag(rawName, token) {
 }
 
 function undoSoftDelete(rawName) {
-  // 削除前の表示順で位置を決定してから textarea を再構築する
-  const displayBefore = buildDisplayList();
+  const entry = _softDeleted.get(rawName);
+  if (!entry) return;
+  const { token: restoredToken, insertAfterRaw } = entry;
   _softDeleted.delete(rawName);
-  const newTokens = displayBefore
-    .map(t => t.rawName === rawName ? { ...t, deleted: false } : t)
-    .filter(t => !t.deleted)
-    .map(t => t.token);
+
   const input = els.scratchpadInput;
-  input.value = newTokens.join(', ');
+  const text = input.value;
+
+  if (insertAfterRaw === null) {
+    // 先頭タグだった場合: テキスト先頭に挿入
+    input.value = restoredToken + (text.trim() ? ', ' + text : '');
+    input.dispatchEvent(new Event('input'));
+    return;
+  }
+
+  // insertAfterRaw の現在のトークン文字列を取得
+  const afterEntry = parseScratchpadTags().find(t => t.rawName === insertAfterRaw);
+  if (!afterEntry) {
+    // 基準タグも削除済み等で見つからない場合は末尾に追加
+    toggleTagInScratchpad(rawName);
+    return;
+  }
+
+  // 改行を保ちつつ afterEntry の直後にトークンを挿入する
+  let inserted = false;
+  const newLines = text.split('\n').map(line => {
+    if (inserted) return line;
+    const parts = line.split(',');
+    const idx = parts.findIndex(p => p.trim() === afterEntry.token);
+    if (idx >= 0) {
+      inserted = true;
+      parts.splice(idx + 1, 0, ' ' + restoredToken);
+      return parts.join(',');
+    }
+    return line;
+  });
+
+  input.value = inserted ? newLines.join('\n') : text + ', ' + restoredToken;
   input.dispatchEvent(new Event('input'));
 }
 
