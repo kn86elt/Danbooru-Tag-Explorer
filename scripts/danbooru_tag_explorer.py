@@ -25,6 +25,8 @@ A1111モードでは CSV は専用エンドポイント (/api/csv/danbooru, /api
 import json
 import re
 import traceback
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 # FastAPI is imported at module level so that Request (and other types) are in
@@ -42,6 +44,29 @@ BASE_DIR      = Path(__file__).parent.parent.resolve()
 DATA_DIR      = BASE_DIR / "data"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 ROUTE_PREFIX  = "/danbooru_tag_explorer"
+
+LLM_PRESETS = [
+    {"id": "ollama",         "label": "Ollama",                "port": 11434, "path": "/v1", "key": "",          "supportsUnload": True},
+    {"id": "lm-studio",      "label": "LM Studio",             "port": 1234,  "path": "/v1", "key": "lm-studio", "supportsUnload": True},
+    {"id": "text-gen-webui", "label": "text-generation-webui", "port": 5000,  "path": "/v1", "key": "",          "supportsUnload": True},
+    {"id": "koboldcpp",      "label": "KoboldCpp",             "port": 5001,  "path": "/v1", "key": "",          "supportsUnload": False},
+    {"id": "llama-server",   "label": "llama.cpp server",      "port": 8080,  "path": "/v1", "key": "none",      "supportsUnload": False},
+    {"id": "custom",         "label": "カスタム",              "port": None,  "path": "/v1", "key": "",          "supportsUnload": False},
+]
+
+def _http_get(url, timeout=5):
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+def _http_post(url, body=None, timeout=10):
+    data = json.dumps(body or {}).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
 
 _TAGCOMPLETE_CSV_CANDIDATES = [
     "a1111-sd-webui-tagcomplete/tags/danbooru.csv",
@@ -104,6 +129,15 @@ _DEFAULTS = {
     "pinnedCats": [],
     "tagCsv":     "data/danbooru.csv",
     "jaCsv":      "data/ja.csv",
+    "llm": {
+        "preset":  "ollama",
+        "host":    "localhost",
+        "port":    11434,
+        "path":    "/v1",
+        "apiKey":  "",
+        "model":   "",
+        "timeout": 30,
+    },
     "_notes": {
         "tagCsv": "Tag metadata CSV (default: data/danbooru.csv) -- A1111モードでは無視される",
         "jaCsv":  "Japanese translation CSV (default: data/ja.csv) -- A1111モードでは無視される",
@@ -267,6 +301,65 @@ def on_app_started(demo, app):
             s["pinnedCats"] = body
             save_settings(s)
             return JSONResponse({"ok": True})
+
+        @app.post(ROUTE_PREFIX + "/api/settings")
+        async def dte_post_settings(request: Request):
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse({"error": "invalid JSON"}, status_code=400)
+            s = load_settings()
+            if isinstance(body.get("llm"), dict):
+                llm = s.setdefault("llm", {})
+                for k in ("preset", "host", "port", "path", "apiKey", "model", "timeout"):
+                    if k in body["llm"]:
+                        llm[k] = body["llm"][k]
+            # A1111モードでは tagCsv/jaCsv は A1111 Settings が管理するため保存しない
+            save_settings(s)
+            return JSONResponse({"ok": True})
+
+        @app.get(ROUTE_PREFIX + "/api/llm/models")
+        def dte_llm_models():
+            llm  = load_settings().get("llm", {})
+            host = (llm.get("host") or "localhost").strip()
+            port = llm.get("port") or 11434
+            path = (llm.get("path") or "/v1").rstrip("/")
+            url  = f"http://{host}:{port}{path}/models"
+            try:
+                data   = _http_get(url, timeout=5)
+                models = [m["id"] for m in data.get("data", []) if isinstance(m, dict) and "id" in m]
+                return JSONResponse({"models": models, "error": None})
+            except Exception as e:
+                return JSONResponse({"models": [], "error": str(e)})
+
+        @app.post(ROUTE_PREFIX + "/api/llm/unload")
+        def dte_llm_unload():
+            llm    = load_settings().get("llm", {})
+            preset = llm.get("preset", "ollama")
+            host   = (llm.get("host") or "localhost").strip()
+            port   = llm.get("port") or 11434
+            model  = (llm.get("model") or "").strip()
+            base   = f"http://{host}:{port}"
+            try:
+                if preset == "ollama":
+                    if not model:
+                        return JSONResponse({"ok": False, "message": "モデル名が設定されていません"})
+                    _http_post(f"{base}/api/generate", {"model": model, "keep_alive": 0})
+                elif preset == "lm-studio":
+                    data    = _http_get(f"{base}/api/v0/models", timeout=5)
+                    entries = data.get("data", data) if isinstance(data, dict) else data
+                    loaded  = [m for m in entries if isinstance(m, dict) and m.get("state") == "loaded"]
+                    if not loaded:
+                        return JSONResponse({"ok": False, "message": "ロード済みモデルが見つかりません"})
+                    iid = loaded[0].get("instance_id") or loaded[0].get("id") or ""
+                    _http_post(f"{base}/api/v1/models/unload", {"instance_id": iid})
+                elif preset == "text-gen-webui":
+                    _http_post(f"{base}/v1/internal/model/unload")
+                else:
+                    return JSONResponse({"ok": False, "message": f"プリセット '{preset}' はアンロードに対応していません"})
+                return JSONResponse({"ok": True})
+            except Exception as e:
+                return JSONResponse({"ok": False, "message": str(e)})
 
         @app.get(ROUTE_PREFIX + "/{path:path}")
         def dte_static(path: str):

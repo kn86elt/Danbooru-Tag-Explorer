@@ -127,6 +127,10 @@ const state = {
   historyFilter: JSON.parse(localStorage.getItem('historyFilter') || '{"search":true,"category":true,"stock":true}'),
   // Sidebar section collapse state
   sectionCollapsed: JSON.parse(localStorage.getItem('sectionCollapsed') || '{}'),
+  llmConfig: {
+    preset: 'ollama', host: 'localhost', port: 11434,
+    path: '/v1', apiKey: '', model: '', timeout: 30,
+  },
 };
 
 // ── Persistence helpers ─────────────────────────────────────────────────────
@@ -170,6 +174,9 @@ async function loadServerSettings() {
     if (Array.isArray(data.pinnedCats)) {
       state.pinnedCats = data.pinnedCats;
       localStorage.setItem('pinnedCats', JSON.stringify(state.pinnedCats));
+    }
+    if (data.llm && typeof data.llm === 'object') {
+      Object.assign(state.llmConfig, data.llm);
     }
     return {
       tagCsv: (typeof data.tagCsv === 'string' && data.tagCsv) ? data.tagCsv : defaults.tagCsv,
@@ -350,6 +357,29 @@ const els = {
   llmTagOutput:   $('llm-tag-output'),
   llmTagList:     $('llm-tag-list'),
   llmConvertBtn:  $('llm-convert-btn'),
+  settingsBtn:          $('settings-btn'),
+  settingsOverlay:      $('settings-overlay'),
+  settingsCloseBtn:     $('settings-close-btn'),
+  settingsSaveBtn:      $('settings-save-btn'),
+  settingsCancelBtn:    $('settings-cancel-btn'),
+  llmPresetSelect:      $('llm-preset-select'),
+  llmHost:              $('llm-host'),
+  llmPort:              $('llm-port'),
+  llmPath:              $('llm-path'),
+  llmApiKey:            $('llm-apikey'),
+  llmModelInput:        $('llm-model'),
+  llmModelDatalist:     $('llm-model-datalist'),
+  llmFetchModelsBtn:    $('llm-fetch-models-btn'),
+  llmModelNote:         $('llm-model-note'),
+  llmUnloadRow:         $('llm-unload-row'),
+  llmUnloadBtn:         $('llm-unload-btn'),
+  llmUnloadNote:        $('llm-unload-note'),
+  llmTestBtn:           $('llm-test-btn'),
+  llmTestNote:          $('llm-test-note'),
+  csvTagPath:           $('csv-tag-path'),
+  csvJaPath:            $('csv-ja-path'),
+  settingsCsvFields:    $('settings-csv-fields'),
+  settingsCsvA1111Note: $('settings-csv-a1111-note'),
   dteDialog:           $('dte-dialog'),
   dteDialogMessage:    $('dte-dialog-message'),
   dteDialogButtons:    $('dte-dialog-buttons'),
@@ -1722,6 +1752,15 @@ function copyToClipboard(text) {
 }
 
 // ソフト削除されたタグ: rawName → textarea 上のトークン文字列
+const LLM_PRESETS = [
+  { id: 'ollama',         label: 'Ollama',                port: 11434, path: '/v1', key: '',          supportsUnload: true  },
+  { id: 'lm-studio',      label: 'LM Studio',             port: 1234,  path: '/v1', key: 'lm-studio', supportsUnload: true  },
+  { id: 'text-gen-webui', label: 'text-generation-webui', port: 5000,  path: '/v1', key: '',          supportsUnload: true  },
+  { id: 'koboldcpp',      label: 'KoboldCpp',             port: 5001,  path: '/v1', key: '',          supportsUnload: false },
+  { id: 'llama-server',   label: 'llama.cpp server',      port: 8080,  path: '/v1', key: 'none',      supportsUnload: false },
+  { id: 'custom',         label: 'カスタム',              port: null,  path: '/v1', key: '',          supportsUnload: false },
+];
+
 const _softDeleted = new Map();
 
 function softDeleteTag(rawName, token) {
@@ -1975,6 +2014,155 @@ function showToast(msg, duration = 2000) {
 
 // ── Scratchpad collapse ─────────────────────────
 let scratchpadExpanded = true;
+
+function initSettingsModal() {
+  // プリセット選択肢を生成
+  LLM_PRESETS.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.label;
+    els.llmPresetSelect?.appendChild(opt);
+  });
+
+  function setNote(el, msg, type = '') {
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'settings-note' + (type ? ' ' + type : '');
+  }
+
+  function clearNotes() {
+    [els.llmModelNote, els.llmTestNote, els.llmUnloadNote].forEach(el => setNote(el, ''));
+  }
+
+  function updateUnloadVisibility() {
+    const preset = LLM_PRESETS.find(p => p.id === els.llmPresetSelect?.value);
+    els.llmUnloadRow?.classList.toggle('hidden', !preset?.supportsUnload);
+  }
+
+  function openSettings() {
+    const c = state.llmConfig;
+    if (els.llmPresetSelect) els.llmPresetSelect.value = c.preset || 'ollama';
+    if (els.llmHost)         els.llmHost.value         = c.host   || 'localhost';
+    if (els.llmPort)         els.llmPort.value         = c.port   || 11434;
+    if (els.llmPath)         els.llmPath.value         = c.path   || '/v1';
+    if (els.llmApiKey)       els.llmApiKey.value       = c.apiKey || '';
+    if (els.llmModelInput)   els.llmModelInput.value   = c.model  || '';
+    updateUnloadVisibility();
+    // CSV フィールド
+    const isA1111 = _mode === 'a1111';
+    els.settingsCsvA1111Note?.classList.toggle('hidden', !isA1111);
+    els.settingsCsvFields?.classList.toggle('hidden', isA1111);
+    if (!isA1111) {
+      fetch('api/settings').then(r => r.json()).then(d => {
+        if (els.csvTagPath) els.csvTagPath.value = d.tagCsv || '';
+        if (els.csvJaPath)  els.csvJaPath.value  = d.jaCsv  || '';
+      }).catch(() => {});
+    }
+    clearNotes();
+    els.settingsOverlay?.classList.remove('hidden');
+  }
+
+  function closeSettings() {
+    els.settingsOverlay?.classList.add('hidden');
+  }
+
+  // プリセット変更 → 接続先を自動補完
+  els.llmPresetSelect?.addEventListener('change', () => {
+    const preset = LLM_PRESETS.find(p => p.id === els.llmPresetSelect.value);
+    if (preset && preset.id !== 'custom') {
+      if (preset.port && els.llmPort)   els.llmPort.value   = preset.port;
+      if (preset.path && els.llmPath)   els.llmPath.value   = preset.path;
+      if (preset.key  && els.llmApiKey) els.llmApiKey.value = preset.key;
+    }
+    updateUnloadVisibility();
+    clearNotes();
+  });
+
+  // モデル一覧取得
+  els.llmFetchModelsBtn?.addEventListener('click', async () => {
+    setNote(els.llmModelNote, '取得中...');
+    try {
+      const data = await fetch('api/llm/models').then(r => r.json());
+      if (data.error) throw new Error(data.error);
+      if (els.llmModelDatalist) {
+        els.llmModelDatalist.innerHTML = '';
+        data.models.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m;
+          els.llmModelDatalist.appendChild(opt);
+        });
+      }
+      setNote(els.llmModelNote, `${data.models.length} 件取得`, 'ok');
+      if (els.llmModelInput && !els.llmModelInput.value && data.models.length > 0) {
+        els.llmModelInput.value = data.models[0];
+      }
+    } catch (e) {
+      setNote(els.llmModelNote, `取得失敗: ${e.message}`, 'error');
+    }
+  });
+
+  // 接続テスト
+  els.llmTestBtn?.addEventListener('click', async () => {
+    setNote(els.llmTestNote, 'テスト中...');
+    try {
+      const data = await fetch('api/llm/models').then(r => r.json());
+      if (data.error) throw new Error(data.error);
+      setNote(els.llmTestNote, `● 接続OK (モデル ${data.models.length} 件)`, 'ok');
+    } catch (e) {
+      setNote(els.llmTestNote, `✕ 接続失敗: ${e.message}`, 'error');
+    }
+  });
+
+  // モデルアンロード
+  els.llmUnloadBtn?.addEventListener('click', async () => {
+    setNote(els.llmUnloadNote, 'アンロード中...');
+    try {
+      const data = await fetch('api/llm/unload', { method: 'POST' }).then(r => r.json());
+      if (!data.ok) throw new Error(data.message || 'unknown error');
+      setNote(els.llmUnloadNote, 'アンロード完了', 'ok');
+    } catch (e) {
+      setNote(els.llmUnloadNote, `失敗: ${e.message}`, 'error');
+    }
+  });
+
+  // 保存
+  els.settingsSaveBtn?.addEventListener('click', async () => {
+    const llm = {
+      preset:  els.llmPresetSelect?.value || 'ollama',
+      host:    els.llmHost?.value.trim()  || 'localhost',
+      port:    parseInt(els.llmPort?.value) || 11434,
+      path:    els.llmPath?.value.trim()  || '/v1',
+      apiKey:  els.llmApiKey?.value.trim() || '',
+      model:   els.llmModelInput?.value.trim() || '',
+      timeout: state.llmConfig.timeout || 30,
+    };
+    const body = { llm };
+    if (_mode !== 'a1111') {
+      body.tagCsv = els.csvTagPath?.value.trim() || '';
+      body.jaCsv  = els.csvJaPath?.value.trim()  || '';
+    }
+    try {
+      const data = await fetch('api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(r => r.json());
+      if (!data.ok) throw new Error('save failed');
+      Object.assign(state.llmConfig, llm);
+      closeSettings();
+      showToast('⚙ 設定を保存しました');
+    } catch (e) {
+      showToast('⚠️ 保存に失敗しました: ' + e.message);
+    }
+  });
+
+  els.settingsBtn?.addEventListener('click', openSettings);
+  els.settingsCloseBtn?.addEventListener('click', closeSettings);
+  els.settingsCancelBtn?.addEventListener('click', closeSettings);
+  els.settingsOverlay?.addEventListener('click', e => {
+    if (e.target === els.settingsOverlay) closeSettings();
+  });
+}
 
 function initScratchpadTabs() {
   const tabs = document.querySelectorAll('.scratchpad-tab');
@@ -3189,6 +3377,7 @@ document.head.appendChild(highlightStyle);
 // Init
 initResizer();
 initMobileSidebar();
+initSettingsModal();
 initScratchpadTabs();
 initScratchpadToggle();
 initScratchpadResizer();
