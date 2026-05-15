@@ -1691,17 +1691,57 @@ function handleSearch(query, isAI = false) {
 
 let _llmSearchAbort = null;
 
-// LLM出力のタグを正規化:
-//   1. バックスラッシュエスケープ除去 (\_ → _) — 常時
-//   2. アンダーバー→スペース変換 — replace-underscore チェック時のみ
-//   3. 末尾にカンマ付加
-function normalizeLlmTags(raw) {
+// LLM出力を解析して英語キーワード配列を返す。
+// "日本語: english keyword" 形式のペア出力と、従来のカンマ区切り形式の両方に対応。
+function parseLlmOutput(raw) {
   const unescaped = raw.replace(/\\_/g, '_');
+  const lines = unescaped.split('\n')
+    .map(l => l.replace(/^[\d]+[.)]\s*|^[-*•]\s*/, '').trim())
+    .filter(Boolean);
+  const pairLines = lines.filter(l => l.includes(':'));
+  if (pairLines.length >= Math.ceil(lines.length / 2)) {
+    // ペア形式: コロン以降を英語キーワードとして抽出
+    const terms = [];
+    for (const line of pairLines) {
+      const en = line.slice(line.indexOf(':') + 1).trim();
+      en.split(',').map(t => t.trim()).filter(Boolean).forEach(t => terms.push(t));
+    }
+    return terms;
+  }
+  // フォールバック: カンマ/改行区切りのタグ列
+  return unescaped.split(/[,\n]/).map(t => t.trim()).filter(Boolean);
+}
+
+// 英語キーワードをDanbooruタグ名に解決する。
+// 1. 完全一致 (spaces→underscores)
+// 2. 全トークン一致の中で最高投稿数のタグ
+// 3. フォールバック: アンダースコア正規化そのまま
+function resolveToDbTag(enTerm) {
+  const underscored = enTerm.toLowerCase().replace(/\s+/g, '_');
+  if (state.tagMeta.has(underscored)) return underscored;
+  const tokens = underscored.split('_').filter(Boolean);
+  if (tokens.length > 1) {
+    let best = null, bestCount = -1;
+    for (const [name, meta] of state.tagMeta) {
+      if (tokens.every(t => name.includes(t)) && meta.count > bestCount) {
+        bestCount = meta.count;
+        best = name;
+      }
+    }
+    if (best) return best;
+  }
+  return underscored;
+}
+
+// LLM出力を正規化してdisplay用文字列に変換:
+//   ペア解析 → Danbooruタグ解決 → replace-underscore適用 → 末尾カンマ付加
+function normalizeLlmTags(raw) {
+  const terms = parseLlmOutput(raw);
   const replaceUs = els.replaceUnderscore?.checked ?? false;
-  const tags = unescaped.split(',').map(t => {
-    const trimmed = t.trim();
-    return replaceUs ? trimmed.replace(/_/g, ' ') : trimmed;
-  }).filter(Boolean);
+  const tags = terms.map(term => {
+    const resolved = resolveToDbTag(term);
+    return replaceUs ? resolved.replace(/_/g, ' ') : resolved;
+  });
   return tags.length ? tags.join(', ') + ',' : '';
 }
 
@@ -1719,8 +1759,8 @@ async function triggerLlmSearch(query) {
     });
     const data = await res.json();
     if (!data.tags) return;
-    const unescaped = data.tags.replace(/\\_/g, '_');
-    const translated = unescaped.split(',').map(t => t.trim()).join(' ');
+    const terms = parseLlmOutput(data.tags);
+    const translated = terms.map(resolveToDbTag).join(' ');
     handleSearch(translated, true);
   } catch (e) {
     if (e.name !== 'AbortError') {} // silent fallback

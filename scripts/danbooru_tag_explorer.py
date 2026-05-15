@@ -386,11 +386,15 @@ def on_app_started(demo, app):
             payload = {
                 "model": model,
                 "messages": [
-                    {"role": "system", "content": "You convert Japanese text to Danbooru image tags.\nOutput only comma-separated English tags in snake_case. No explanation."},
+                    {"role": "system", "content": (
+                        "Convert Japanese text to English keywords for Danbooru image tags.\n"
+                        "For each concept output exactly one line: japanese_word: english keyword\n"
+                        "Use plain English words (no underscores, no snake_case). No explanation."
+                    )},
                     {"role": "user",   "content": text},
                 ],
                 "temperature": 0.3,
-                "max_tokens":  256,
+                "max_tokens":  300,
                 "stream":      False,
             }
             try:
