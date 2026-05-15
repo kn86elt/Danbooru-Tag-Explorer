@@ -36,6 +36,7 @@
           spellcheck="false"
         />
         <button id="search-clear" class="search-clear" title="クリア" aria-label="検索クリア">✕</button>
+        <button id="search-llm-btn" class="search-llm-btn" title="LLMで翻訳して検索">🤖</button>
       </div>
     </div>
     <div class="header-right">
@@ -316,6 +317,14 @@
         <button id="llm-convert-btn" class="btn-icon hidden" title="LLMでタグに変換">
           <span class="btn-icon-inner">→</span>
           <span class="btn-label">変換</span>
+        </button>
+        <button id="llm-copy-btn" class="btn-icon hidden" title="変換結果をコピー">
+          <span class="btn-icon-inner">📋</span>
+          <span class="btn-label">コピー</span>
+        </button>
+        <button id="llm-clear-btn" class="btn-icon hidden" title="入力・出力をクリア">
+          <span class="btn-icon-inner">🗑</span>
+          <span class="btn-label">クリア</span>
         </button>
         <label class="toggle-label" style="margin-right: 12px; font-size: 11px;">
           <input type="checkbox" id="append-comma" checked />

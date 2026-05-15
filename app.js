@@ -284,6 +284,7 @@ const $ = id => document.getElementById(id);
 const els = {
   globalSearch:    $('global-search'),
   searchClear:     $('search-clear'),
+  searchLlmBtn:    $('search-llm-btn'),
   searchOverlay:   $('search-results-overlay'),
   searchList:      $('search-results-list'),
   searchCount:     $('search-results-count'),
@@ -358,6 +359,8 @@ const els = {
   llmTagOutput:   $('llm-tag-output'),
   llmTagList:     $('llm-tag-list'),
   llmConvertBtn:  $('llm-convert-btn'),
+  llmCopyBtn:     $('llm-copy-btn'),
+  llmClearBtn:    $('llm-clear-btn'),
   settingsBtn:          $('settings-btn'),
   settingsOverlay:      $('settings-overlay'),
   settingsCloseBtn:     $('settings-close-btn'),
@@ -2218,7 +2221,8 @@ function initScratchpadTabs() {
       els.tabPanelLlm?.classList.toggle('hidden', target !== 'llm');
       const promptOnly = [els.scratchpadFormatBtn, els.scratchpadCopy, els.scratchpadClear];
       promptOnly.forEach(el => el?.classList.toggle('hidden', target !== 'prompt'));
-      els.llmConvertBtn?.classList.toggle('hidden', target !== 'llm');
+      const llmOnly = [els.llmConvertBtn, els.llmCopyBtn, els.llmClearBtn];
+      llmOnly.forEach(el => el?.classList.toggle('hidden', target !== 'llm'));
     });
   });
 }
@@ -2251,6 +2255,28 @@ function initLlmConvert() {
       btn.disabled = false;
       if (label) label.textContent = origText;
     }
+  });
+
+  // LLMタブ: コピーボタン（変換結果をコピー）
+  els.llmCopyBtn?.addEventListener('click', () => {
+    const val = els.llmTagOutput?.value.trim();
+    if (!val) { showToast('コピーするタグがありません'); return; }
+    copyToClipboard(val);
+  });
+
+  // LLMタブ: クリアボタン（入力・出力両方クリア）
+  els.llmClearBtn?.addEventListener('click', () => {
+    if (els.llmJpInput)    els.llmJpInput.value    = '';
+    if (els.llmTagOutput)  els.llmTagOutput.value   = '';
+    renderLlmTagList();
+    showToast('🗑 クリアしました');
+  });
+
+  // 検索: LLM強制翻訳ボタン
+  els.searchLlmBtn?.addEventListener('click', () => {
+    const query = els.globalSearch.value.trim();
+    if (!query) { showToast('検索キーワードを入力してください'); return; }
+    triggerLlmSearch(query);
   });
 }
 

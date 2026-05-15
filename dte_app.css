@@ -184,6 +184,18 @@ body {
   flex-shrink: 0;
 }
 .search-clear:hover { color: var(--text); }
+.search-llm-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 8px 0 0;
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+  opacity: 0.6;
+  transition: opacity var(--t-fast);
+}
+.search-llm-btn:hover { opacity: 1; }
 
 /* Tag count badge */
 .tag-count-badge {
