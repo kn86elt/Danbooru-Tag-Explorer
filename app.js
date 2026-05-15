@@ -1696,7 +1696,7 @@ let _llmSearchAbort = null;
 //   2. アンダーバー→スペース変換 — replace-underscore チェック時のみ
 //   3. 末尾にカンマ付加
 function normalizeLlmTags(raw) {
-  const unescaped = raw.replace(/\\(.)/g, '$1');
+  const unescaped = raw.replace(/\\_/g, '_');
   const replaceUs = els.replaceUnderscore?.checked ?? false;
   const tags = unescaped.split(',').map(t => {
     const trimmed = t.trim();
@@ -1719,7 +1719,7 @@ async function triggerLlmSearch(query) {
     });
     const data = await res.json();
     if (!data.tags) return;
-    const unescaped = data.tags.replace(/\\(.)/g, '$1');
+    const unescaped = data.tags.replace(/\\_/g, '_');
     const translated = unescaped.split(',').map(t => t.trim()).join(' ');
     handleSearch(translated, true);
   } catch (e) {
