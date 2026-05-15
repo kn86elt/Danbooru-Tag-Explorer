@@ -1715,6 +1715,22 @@ function copyToClipboard(text) {
   }
 }
 
+function softDeleteTag(rawName, token) {
+  toggleTagInScratchpad(rawName);   // textarea から削除（synthetic input を発火）
+  _softDeleted.set(rawName, token);
+  renderScratchpadTagList();
+}
+
+function undoSoftDelete(rawName) {
+  _softDeleted.delete(rawName);
+  toggleTagInScratchpad(rawName);   // textarea に戻す（not present → 追加される）
+}
+
+function permanentDeleteTag(rawName) {
+  _softDeleted.delete(rawName);
+  renderScratchpadTagList();
+}
+
 function parseScratchpadTags() {
   return els.scratchpadInput.value
     .split(/[\n,]/)
@@ -1731,43 +1747,59 @@ function parseScratchpadTags() {
     });
 }
 
-function renderScratchpadTagList() {
-  const list = els.scratchpadTagList;
-  if (!list) return;
-  const tags = parseScratchpadTags();
-  list.innerHTML = '';
-  for (const { token, rawName, known } of tags) {
-    const item = document.createElement('div');
-    item.className = 'scratchpad-tag-item';
+function createTagListItem(token, rawName, known, softDeleted) {
+  const item = document.createElement('div');
+  item.className = 'scratchpad-tag-item' + (softDeleted ? ' scratchpad-tag-deleted' : '');
 
-    const nameEl = document.createElement('span');
-    nameEl.className = 'scratchpad-tag-name' + (known ? '' : ' scratchpad-tag-unknown');
-    nameEl.textContent = token;
+  const nameEl = document.createElement('span');
+  nameEl.className = 'scratchpad-tag-name' + (!known && !softDeleted ? ' scratchpad-tag-unknown' : '');
+  nameEl.textContent = token;
+
+  if (softDeleted) {
+    nameEl.title = 'クリックで削除を取り消す';
+    nameEl.addEventListener('click', () => undoSoftDelete(rawName));
+  } else {
     if (known) nameEl.title = rawName;
-
     nameEl.addEventListener('click', () => {
       openTagDetail(rawName, state.tagNodes.get(rawName)?.breadcrumb);
     });
     if (!isCoarsePointer()) {
       nameEl.addEventListener('mouseenter', e => {
-        showWikiPreview(e, { name: rawName }, state.tagMeta.get(rawName));
+        showWikiPreview(e, { name: rawName }, state.tagMeta.get(rawName), { anchorLeft: true });
       });
       nameEl.addEventListener('mousemove',  e => repositionWikiPreview(e));
       nameEl.addEventListener('mouseleave', () => hideWikiPreview());
     }
+  }
 
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'scratchpad-tag-remove';
-    removeBtn.textContent = '×';
-    removeBtn.title = '削除';
-    removeBtn.addEventListener('click', e => {
-      e.stopPropagation();
-      toggleTagInScratchpad(rawName);
-    });
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'scratchpad-tag-remove';
+  removeBtn.textContent = '×';
+  removeBtn.title = softDeleted ? '完全削除' : '削除';
+  removeBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    softDeleted ? permanentDeleteTag(rawName) : softDeleteTag(rawName, token);
+  });
 
-    item.appendChild(nameEl);
-    item.appendChild(removeBtn);
-    list.appendChild(item);
+  item.appendChild(nameEl);
+  item.appendChild(removeBtn);
+  return item;
+}
+
+function renderScratchpadTagList() {
+  const list = els.scratchpadTagList;
+  if (!list) return;
+  list.innerHTML = '';
+  const activeTags = parseScratchpadTags();
+  // textarea に戻ったタグは soft-deleted から除外
+  for (const { rawName } of activeTags) {
+    if (_softDeleted.has(rawName)) _softDeleted.delete(rawName);
+  }
+  for (const { token, rawName, known } of activeTags) {
+    list.appendChild(createTagListItem(token, rawName, known, false));
+  }
+  for (const [rawName, token] of _softDeleted) {
+    list.appendChild(createTagListItem(token, rawName, state.tagMeta.has(rawName), true));
   }
 }
 
@@ -2244,17 +2276,21 @@ els.scratchpadCopy.addEventListener('click', () => {
 els.scratchpadClear.addEventListener('click', () => {
   els.scratchpadInput.value = '';
   localStorage.removeItem('scratchpad');
+  _softDeleted.clear();
+  renderScratchpadTagList();
   showToast('🗑 クリアしました');
 });
 
 // Save scratchpad content (debounced)
-els.scratchpadInput.addEventListener('input', () => {
+els.scratchpadInput.addEventListener('input', (e) => {
+  // ユーザーが直接編集した場合はソフト削除を強制的に完全削除
+  if (e.isTrusted && _softDeleted.size > 0) _softDeleted.clear();
   clearTimeout(els.scratchpadInput._saveTimer);
   els.scratchpadInput._saveTimer = setTimeout(() => {
     localStorage.setItem('scratchpad', els.scratchpadInput.value);
   }, 500);
+  renderScratchpadTagList();
 });
-els.scratchpadInput.addEventListener('input', renderScratchpadTagList);
 
 els.scratchpadFormatBtn?.addEventListener('click', formatScratchpad);
 
@@ -2777,6 +2813,9 @@ const wikiPreviewEl = (() => {
 
 const _wikiInfoCache = new Map();
 
+// ソフト削除されたタグ: rawName → textarea 上のトークン文字列
+const _softDeleted = new Map();
+
 // ── Wiki DText レンダラー（モーダル用・タグリンク付き）────
 function renderWikiBody(text, container) {
   // 基本的なフォーマットタグを除去しつつ [[tag]] / {{tag}} は保持
@@ -2890,7 +2929,8 @@ function openWikiLink(tag) {
   window.open(url, '_blank');
 }
 
-function showWikiPreview(e, tag, meta) {
+function showWikiPreview(e, tag, meta, opts = {}) {
+  wikiPreviewEl._anchorLeft = opts.anchorLeft || false;
   const catColors = {
     0: 'var(--cat-0)', 1: 'var(--cat-1)', 3: 'var(--cat-3)',
     4: 'var(--cat-4)', 5: 'var(--cat-5)'
@@ -2961,7 +3001,10 @@ function repositionWikiPreview(e) {
     wikiPreviewEl.style.left = ((window.innerWidth - w) / 2) + 'px';
     wikiPreviewEl.style.top  = '72px'; // just below header
   } else {
-    const x = Math.min(e.clientX + 14, window.innerWidth  - 340);
+    const anchorLeft = wikiPreviewEl._anchorLeft;
+    const x = anchorLeft
+      ? Math.max(8, e.clientX - 340 - 14)
+      : Math.min(e.clientX + 14, window.innerWidth - 340);
     const y = Math.min(e.clientY + 14, window.innerHeight - 260);
     wikiPreviewEl.style.left = x + 'px';
     wikiPreviewEl.style.top  = y + 'px';

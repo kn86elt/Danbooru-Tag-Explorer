@@ -1333,6 +1333,17 @@ body {
   color: #e55;
   background: var(--surface3);
 }
+.scratchpad-tag-deleted .scratchpad-tag-name {
+  text-decoration: line-through;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.scratchpad-tag-deleted .scratchpad-tag-name:hover {
+  color: var(--accent);
+}
+.scratchpad-tag-deleted .scratchpad-tag-remove {
+  opacity: 1;
+}
 
 /* ---------- Utilities ---------- */
 .hidden { display: none !important; }
