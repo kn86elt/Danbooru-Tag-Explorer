@@ -1719,14 +1719,25 @@ function copyToClipboard(text) {
 const _softDeleted = new Map();
 
 function softDeleteTag(rawName, token) {
-  toggleTagInScratchpad(rawName);   // textarea から削除（synthetic input を発火）
-  _softDeleted.set(rawName, token);
-  renderScratchpadTagList();
+  // 削除前に「直前のタグ」を記録して元の位置を保持できるようにする
+  const activeTags = parseScratchpadTags();
+  const idx = activeTags.findIndex(t => t.rawName === rawName);
+  const insertAfterRaw = idx > 0 ? activeTags[idx - 1].rawName : null;
+  _softDeleted.set(rawName, { token, insertAfterRaw });
+  toggleTagInScratchpad(rawName); // synthetic input が renderScratchpadTagList を起動
 }
 
 function undoSoftDelete(rawName) {
+  // 削除前の表示順で位置を決定してから textarea を再構築する
+  const displayBefore = buildDisplayList();
   _softDeleted.delete(rawName);
-  toggleTagInScratchpad(rawName);   // textarea に戻す（not present → 追加される）
+  const newTokens = displayBefore
+    .map(t => t.rawName === rawName ? { ...t, deleted: false } : t)
+    .filter(t => !t.deleted)
+    .map(t => t.token);
+  const input = els.scratchpadInput;
+  input.value = newTokens.join(', ');
+  input.dispatchEvent(new Event('input'));
 }
 
 function permanentDeleteTag(rawName) {
@@ -1794,20 +1805,30 @@ function createTagListItem(token, rawName, known, softDeleted) {
   return item;
 }
 
+function buildDisplayList() {
+  const activeTags = parseScratchpadTags();
+  // textarea に戻ったタグは soft-deleted から除外
+  for (const { rawName } of activeTags) _softDeleted.delete(rawName);
+  // アクティブタグをベースに、ソフト削除タグを元の位置に挿入してマージ
+  const result = activeTags.map(t => ({ ...t, deleted: false }));
+  for (const [rawName, { token, insertAfterRaw }] of _softDeleted) {
+    const item = { token, rawName, known: state.tagMeta.has(rawName), deleted: true };
+    if (insertAfterRaw === null) {
+      result.unshift(item);
+    } else {
+      const afterIdx = result.findIndex(t => t.rawName === insertAfterRaw);
+      afterIdx >= 0 ? result.splice(afterIdx + 1, 0, item) : result.push(item);
+    }
+  }
+  return result;
+}
+
 function renderScratchpadTagList() {
   const list = els.scratchpadTagList;
   if (!list) return;
   list.innerHTML = '';
-  const activeTags = parseScratchpadTags();
-  // textarea に戻ったタグは soft-deleted から除外
-  for (const { rawName } of activeTags) {
-    if (_softDeleted.has(rawName)) _softDeleted.delete(rawName);
-  }
-  for (const { token, rawName, known } of activeTags) {
-    list.appendChild(createTagListItem(token, rawName, known, false));
-  }
-  for (const [rawName, token] of _softDeleted) {
-    list.appendChild(createTagListItem(token, rawName, state.tagMeta.has(rawName), true));
+  for (const { token, rawName, known, deleted } of buildDisplayList()) {
+    list.appendChild(createTagListItem(token, rawName, known, deleted));
   }
 }
 
