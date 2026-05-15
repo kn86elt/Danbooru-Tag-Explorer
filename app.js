@@ -2024,6 +2024,15 @@ function initSettingsModal() {
     els.llmPresetSelect?.appendChild(opt);
   });
 
+  // 現在のフォーム値をクエリパラメータ化（保存前テスト用）
+  function llmQueryParams() {
+    return '?' + new URLSearchParams({
+      host: els.llmHost?.value.trim()  || 'localhost',
+      port: els.llmPort?.value         || 11434,
+      path: els.llmPath?.value.trim()  || '/v1',
+    }).toString();
+  }
+
   function setNote(el, msg, type = '') {
     if (!el) return;
     el.textContent = msg;
@@ -2082,7 +2091,7 @@ function initSettingsModal() {
   els.llmFetchModelsBtn?.addEventListener('click', async () => {
     setNote(els.llmModelNote, '取得中...');
     try {
-      const data = await fetch('api/llm/models').then(r => r.json());
+      const data = await fetch('api/llm/models' + llmQueryParams()).then(r => r.json());
       if (data.error) throw new Error(data.error);
       if (els.llmModelDatalist) {
         els.llmModelDatalist.innerHTML = '';
@@ -2105,7 +2114,7 @@ function initSettingsModal() {
   els.llmTestBtn?.addEventListener('click', async () => {
     setNote(els.llmTestNote, 'テスト中...');
     try {
-      const data = await fetch('api/llm/models').then(r => r.json());
+      const data = await fetch('api/llm/models' + llmQueryParams()).then(r => r.json());
       if (data.error) throw new Error(data.error);
       setNote(els.llmTestNote, `● 接続OK (モデル ${data.models.length} 件)`, 'ok');
     } catch (e) {

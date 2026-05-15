@@ -154,9 +154,10 @@ def api_post_settings():
 @app.route("/api/llm/models", methods=["GET"])
 def api_llm_models():
     llm  = load_settings().get("llm", {})
-    host = (llm.get("host") or "localhost").strip()
-    port = llm.get("port") or 11434
-    path = (llm.get("path") or "/v1").rstrip("/")
+    # クエリパラメータが渡された場合はそちらを優先（保存前のテスト用）
+    host = (request.args.get("host") or llm.get("host") or "localhost").strip()
+    port = int(request.args.get("port") or llm.get("port") or 11434)
+    path = (request.args.get("path") or llm.get("path") or "/v1").rstrip("/")
     url  = f"http://{host}:{port}{path}/models"
     try:
         data   = _http_get(url, timeout=5)

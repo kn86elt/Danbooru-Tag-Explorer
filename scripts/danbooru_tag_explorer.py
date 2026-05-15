@@ -319,11 +319,11 @@ def on_app_started(demo, app):
             return JSONResponse({"ok": True})
 
         @app.get(ROUTE_PREFIX + "/api/llm/models")
-        def dte_llm_models():
+        def dte_llm_models(request: Request):
             llm  = load_settings().get("llm", {})
-            host = (llm.get("host") or "localhost").strip()
-            port = llm.get("port") or 11434
-            path = (llm.get("path") or "/v1").rstrip("/")
+            host = (request.query_params.get("host") or llm.get("host") or "localhost").strip()
+            port = int(request.query_params.get("port") or llm.get("port") or 11434)
+            path = (request.query_params.get("path") or llm.get("path") or "/v1").rstrip("/")
             url  = f"http://{host}:{port}{path}/models"
             try:
                 data   = _http_get(url, timeout=5)
