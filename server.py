@@ -226,6 +226,7 @@ def api_ai_translate():
             {"role": "system", "content": (
                 "Convert Japanese text to English keywords for Danbooru image tags.\n"
                 "For each concept output exactly one line: japanese_word: english keyword\n"
+                "IMPORTANT: Use the exact Japanese characters from the input as japanese_word. Do NOT convert to hiragana or katakana.\n"
                 "Use plain English words (no underscores, no snake_case). No explanation."
             )},
             {"role": "user",   "content": text},
