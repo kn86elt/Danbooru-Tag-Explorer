@@ -1767,10 +1767,15 @@ function createTagListItem(token, rawName, known, softDeleted) {
       openTagDetail(rawName, state.tagNodes.get(rawName)?.breadcrumb);
     });
     if (!isCoarsePointer()) {
-      nameEl.addEventListener('mouseenter', e => {
-        showWikiPreview(e, { name: rawName }, state.tagMeta.get(rawName), { anchorLeft: true });
+      nameEl.addEventListener('mouseenter', () => {
+        const rect = nameEl.getBoundingClientRect();
+        showWikiPreview(null, { name: rawName }, state.tagMeta.get(rawName), {
+          fixedPos: {
+            x: Math.max(8, rect.left - 348),
+            y: Math.min(rect.top, window.innerHeight - 260),
+          },
+        });
       });
-      nameEl.addEventListener('mousemove',  e => repositionWikiPreview(e));
       nameEl.addEventListener('mouseleave', () => hideWikiPreview());
     }
   }
@@ -2931,6 +2936,7 @@ function openWikiLink(tag) {
 
 function showWikiPreview(e, tag, meta, opts = {}) {
   wikiPreviewEl._anchorLeft = opts.anchorLeft || false;
+  wikiPreviewEl._fixedPos   = opts.fixedPos   || null;
   const catColors = {
     0: 'var(--cat-0)', 1: 'var(--cat-1)', 3: 'var(--cat-3)',
     4: 'var(--cat-4)', 5: 'var(--cat-5)'
@@ -2960,7 +2966,13 @@ function showWikiPreview(e, tag, meta, opts = {}) {
     wikiPreviewEl.appendChild(hintEl);
   }
 
-  repositionWikiPreview(e);
+  if (opts.fixedPos) {
+    wikiPreviewEl.style.left  = opts.fixedPos.x + 'px';
+    wikiPreviewEl.style.top   = opts.fixedPos.y + 'px';
+    wikiPreviewEl.style.width = '';
+  } else {
+    repositionWikiPreview(e);
+  }
   wikiPreviewEl.style.display = 'block';
 
   fetchTagWikiInfo(tag.name).then(info => {
@@ -2994,6 +3006,7 @@ function showWikiPreview(e, tag, meta, opts = {}) {
 }
 
 function repositionWikiPreview(e) {
+  if (wikiPreviewEl._fixedPos) return;
   if (isCoarsePointer()) {
     // Mobile: center horizontally, fixed near top
     const w = Math.min(300, window.innerWidth - 32);
