@@ -1269,6 +1269,71 @@ body {
   color: var(--text-dim);
 }
 
+/* ---- Scratchpad body: textarea + tag list ---- */
+.scratchpad-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---- Scratchpad tag list (right panel) ---- */
+.scratchpad-tag-list {
+  width: 180px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  padding: 4px 0;
+}
+.scratchpad-tag-item {
+  display: flex;
+  align-items: center;
+  padding: 2px 6px 2px 8px;
+  gap: 4px;
+  min-width: 0;
+}
+.scratchpad-tag-item:hover {
+  background: var(--surface3);
+}
+.scratchpad-tag-name {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  user-select: none;
+}
+.scratchpad-tag-name:hover {
+  color: var(--accent);
+}
+.scratchpad-tag-unknown {
+  color: var(--text-dim);
+}
+.scratchpad-tag-remove {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 3px;
+  line-height: 1;
+  flex-shrink: 0;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity var(--t-fast), color var(--t-fast);
+}
+.scratchpad-tag-item:hover .scratchpad-tag-remove {
+  opacity: 1;
+}
+.scratchpad-tag-remove:hover {
+  color: #e55;
+  background: var(--surface3);
+}
+
 /* ---------- Utilities ---------- */
 .hidden { display: none !important; }
 
@@ -1389,7 +1454,7 @@ body {
 .scratchpad.collapsed {
   height: 36px !important;
 }
-.scratchpad.collapsed .scratchpad-input {
+.scratchpad.collapsed .scratchpad-body {
   display: none;
 }
 .scratchpad.collapsed .scratchpad-actions {

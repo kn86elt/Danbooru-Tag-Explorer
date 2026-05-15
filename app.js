@@ -343,6 +343,7 @@ const els = {
   a1111SendBtn:        $('a1111-send-btn'),
   a1111PromptTarget:   $('a1111-prompt-target'),
   scratchpadFormatBtn: $('scratchpad-format-btn'),
+  scratchpadTagList:   $('scratchpad-tag-list'),
   dteDialog:           $('dte-dialog'),
   dteDialogMessage:    $('dte-dialog-message'),
   dteDialogButtons:    $('dte-dialog-buttons'),
@@ -1714,6 +1715,62 @@ function copyToClipboard(text) {
   }
 }
 
+function parseScratchpadTags() {
+  return els.scratchpadInput.value
+    .split(/[\n,]/)
+    .map(t => t.trim())
+    .filter(Boolean)
+    .map(token => {
+      // export フォーマット（\( \)、スペース→_）を逆変換して raw タグ名を復元する
+      const normalized = token
+        .replace(/\\\(/g, '(')
+        .replace(/\\\)/g, ')')
+        .replace(/ /g, '_');
+      const known = state.tagMeta.has(normalized);
+      return { token, rawName: known ? normalized : token, known };
+    });
+}
+
+function renderScratchpadTagList() {
+  const list = els.scratchpadTagList;
+  if (!list) return;
+  const tags = parseScratchpadTags();
+  list.innerHTML = '';
+  for (const { token, rawName, known } of tags) {
+    const item = document.createElement('div');
+    item.className = 'scratchpad-tag-item';
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'scratchpad-tag-name' + (known ? '' : ' scratchpad-tag-unknown');
+    nameEl.textContent = token;
+    if (known) nameEl.title = rawName;
+
+    nameEl.addEventListener('click', () => {
+      openTagDetail(rawName, state.tagNodes.get(rawName)?.breadcrumb);
+    });
+    if (!isCoarsePointer()) {
+      nameEl.addEventListener('mouseenter', e => {
+        showWikiPreview(e, { name: rawName }, state.tagMeta.get(rawName));
+      });
+      nameEl.addEventListener('mousemove',  e => repositionWikiPreview(e));
+      nameEl.addEventListener('mouseleave', () => hideWikiPreview());
+    }
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'scratchpad-tag-remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = '削除';
+    removeBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      toggleTagInScratchpad(rawName);
+    });
+
+    item.appendChild(nameEl);
+    item.appendChild(removeBtn);
+    list.appendChild(item);
+  }
+}
+
 function toggleTagInScratchpad(name) {
   const tagText    = formatTagForExport(name);                    // 比較・削除用（カンマなし）
   const formatted  = formatTagForExport(name, { withComma: true }); // 挿入用（カンマあり）
@@ -2049,6 +2106,7 @@ document.getElementById('sidebar-theme-btn')?.addEventListener('click', () => {
 
   const savedScratchpad = localStorage.getItem('scratchpad');
   if (savedScratchpad) els.scratchpadInput.value = savedScratchpad;
+  renderScratchpadTagList();
 
   const savedSidebarW = localStorage.getItem('sidebarWidth');
   if (savedSidebarW) els.sidebar.style.width = savedSidebarW + 'px';
@@ -2196,6 +2254,7 @@ els.scratchpadInput.addEventListener('input', () => {
     localStorage.setItem('scratchpad', els.scratchpadInput.value);
   }, 500);
 });
+els.scratchpadInput.addEventListener('input', renderScratchpadTagList);
 
 els.scratchpadFormatBtn?.addEventListener('click', formatScratchpad);
 
