@@ -1734,39 +1734,45 @@ function undoSoftDelete(rawName) {
   _softDeleted.delete(rawName);
 
   const input = els.scratchpadInput;
-  const text = input.value;
 
   if (insertAfterRaw === null) {
     // 先頭タグだった場合: テキスト先頭に挿入
+    const text = input.value;
     input.value = restoredToken + (text.trim() ? ', ' + text : '');
     input.dispatchEvent(new Event('input'));
     return;
   }
 
-  // insertAfterRaw の現在のトークン文字列を取得
   const afterEntry = parseScratchpadTags().find(t => t.rawName === insertAfterRaw);
   if (!afterEntry) {
-    // 基準タグも削除済み等で見つからない場合は末尾に追加
     toggleTagInScratchpad(rawName);
     return;
   }
 
-  // 改行を保ちつつ afterEntry の直後にトークンを挿入する
-  let inserted = false;
-  const newLines = text.split('\n').map(line => {
-    if (inserted) return line;
-    const parts = line.split(',');
-    const idx = parts.findIndex(p => p.trim() === afterEntry.token);
-    if (idx >= 0) {
-      inserted = true;
-      parts.splice(idx + 1, 0, ' ' + restoredToken);
-      return parts.join(',');
+  // afterEntry.token の終端にカーソルを移動し insertAtScratchpadCursor で挿入
+  // → テキストを直接書き換えないので改行レイアウトが保たれる
+  const text = input.value;
+  let insertPos = -1;
+  let offset = 0;
+  for (const line of text.split('\n')) {
+    let partOff = offset;
+    for (const part of line.split(',')) {
+      if (part.trim() === afterEntry.token) {
+        insertPos = partOff + part.indexOf(afterEntry.token) + afterEntry.token.length;
+        break;
+      }
+      partOff += part.length + 1; // +1 for ','
     }
-    return line;
-  });
+    if (insertPos >= 0) break;
+    offset += line.length + 1; // +1 for '\n'
+  }
 
-  input.value = inserted ? newLines.join('\n') : text + ', ' + restoredToken;
-  input.dispatchEvent(new Event('input'));
+  if (insertPos >= 0) {
+    input.selectionStart = input.selectionEnd = insertPos;
+    insertAtScratchpadCursor(restoredToken);
+  } else {
+    toggleTagInScratchpad(rawName);
+  }
 }
 
 function permanentDeleteTag(rawName) {
