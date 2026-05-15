@@ -443,6 +443,7 @@ async function boot() {
     hideLoading();
 
     if (_mode === 'a1111') initA1111Mode();
+    tryAutoDetectLlm(); // non-blocking: サイレントでモデル自動検出
 
     state.observer = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting) {
@@ -1690,6 +1691,24 @@ function handleSearch(query, isAI = false) {
 }
 
 let _llmSearchAbort = null;
+
+// boot後にサイレント実行: LLMサーバーが起動中でモデルが取得できればインメモリにセット。
+// モデル未設定時のみ動作し、設定はsettings.jsonに保存しない。
+async function tryAutoDetectLlm() {
+  if (state.llmConfig.model) return;
+  try {
+    const { host, port, path } = state.llmConfig;
+    const params = new URLSearchParams({
+      host: host || 'localhost',
+      port: port || 11434,
+      path: path || '/v1',
+    });
+    const data = await fetch(`api/llm/models?${params}`).then(r => r.json());
+    if (data.models && data.models.length > 0) {
+      state.llmConfig.model = data.models[0];
+    }
+  } catch (e) { /* LLM未起動は正常 */ }
+}
 
 // LLM出力を {ja, en} ペア配列に解析する。
 // "日本語: english keyword" 形式と従来のカンマ区切り形式の両方に対応。
