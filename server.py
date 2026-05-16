@@ -223,7 +223,7 @@ def api_ai_translate():
         extra_headers["Authorization"] = f"Bearer {api_key}"
     if free_mode:
         sp = (body.get("systemPrompt") or "").strip()
-        system_content = sp if sp else "You are a helpful assistant."
+        system_content = sp if sp else "You are a helpful assistant. Keep your response concise and brief, within a few lines."
         temperature = 0.7
         max_tokens  = 800
     else:
