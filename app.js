@@ -1694,7 +1694,7 @@ function handleSearch(query, isAI = false) {
 let _llmSearchAbort   = null;
 let _lastAiQuery      = null; // AI翻訳で得られた翻訳済みクエリ（Enter一覧表示に使用）
 let _aiOriginalQuery  = null; // 元の日本語クエリ（[+][-]再翻訳に使用）
-let _aiCandidateCount = 3;    // 現在リクエスト中の候補数
+let _aiCandidateCount = Math.max(1, Math.min(parseInt(localStorage.getItem('dte_aiCandidateCount') || '3', 10), 10));
 
 // boot後にサイレント実行: LLMサーバーが起動中でモデルが取得できればインメモリにセット。
 // モデル未設定時のみ動作し、設定はsettings.jsonに保存しない。
@@ -1893,6 +1893,7 @@ async function triggerLlmSearch(query, count) {
   _llmSearchAbort = new AbortController();
   _aiOriginalQuery  = query;
   _aiCandidateCount = count;
+  localStorage.setItem('dte_aiCandidateCount', count);
   const hint = els.searchEnterHint;
   if (hint) hint.textContent = '🤖 翻訳中...';
   try {
@@ -2804,7 +2805,7 @@ els.globalSearch.addEventListener('input', e => {
   // Cancel any pending LLM search, reset translated query and candidate chips
   clearTimeout(_llmSearchDebounce);
   if (_llmSearchAbort) { _llmSearchAbort.abort(); _llmSearchAbort = null; }
-  _lastAiQuery = null; _aiOriginalQuery = null; _aiCandidateCount = 3;
+  _lastAiQuery = null; _aiOriginalQuery = null;
   if (els.searchAiCandidates) { els.searchAiCandidates.classList.add('hidden'); els.searchAiCandidates.innerHTML = ''; }
 
   // Normal search (150ms)
@@ -2825,7 +2826,7 @@ els.searchClear.addEventListener('click', () => {
   els.searchAiBadge?.classList.add('hidden');
   clearTimeout(_llmSearchDebounce);
   if (_llmSearchAbort) { _llmSearchAbort.abort(); _llmSearchAbort = null; }
-  _lastAiQuery = null; _aiOriginalQuery = null; _aiCandidateCount = 3;
+  _lastAiQuery = null; _aiOriginalQuery = null;
   if (els.searchAiCandidates) { els.searchAiCandidates.classList.add('hidden'); els.searchAiCandidates.innerHTML = ''; }
 });
 document.addEventListener('click', e => {
