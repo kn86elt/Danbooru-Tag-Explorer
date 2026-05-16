@@ -1874,6 +1874,8 @@ async function triggerLlmSearch(query) {
     // 各コンセプトの全候補を解決し、クエリバリアントを生成
     const candidateSets = pairs.map(resolveAllCandidates);
     const variants = buildQueryVariants(candidateSets);
+    // 末尾に元の検索ワードを追加（重複しない場合のみ）
+    if (!variants.includes(query)) variants.push(query);
     const primary = variants[0] ?? '';
     _lastAiQuery = primary;
     handleSearch(primary, true);
