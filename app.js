@@ -2310,7 +2310,13 @@ function renderLlmTagGroups() {
       nameEl.title = resolved;
       nameEl.addEventListener('click', e => {
         e.stopPropagation();
-        openTagDetail(resolved, state.tagNodes.get(resolved)?.breadcrumb);
+        if (isActive) {
+          openTagDetail(resolved, state.tagNodes.get(resolved)?.breadcrumb);
+        } else {
+          group.activeIdx = ci;
+          syncLlmGroupsToTextarea();
+          renderLlmTagGroups();
+        }
       });
       if (!isCoarsePointer()) {
         nameEl.addEventListener('mouseenter', () => {
