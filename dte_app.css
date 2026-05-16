@@ -377,6 +377,7 @@ body {
 }
 .search-ai-count-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .search-ai-count-btn:disabled { opacity: 0.35; cursor: default; }
+.search-ai-refresh-btn { margin-left: 4px; }
 .search-ai-count-label {
   color: var(--text-dim);
   font-size: 10px;

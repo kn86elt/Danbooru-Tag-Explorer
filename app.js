@@ -1868,9 +1868,18 @@ function renderAiCandidates(variants, activeIdx) {
       triggerLlmSearch(_aiOriginalQuery, _aiCandidateCount + 1);
   });
 
+  const btnRefresh = document.createElement('button');
+  btnRefresh.className = 'search-ai-count-btn search-ai-refresh-btn';
+  btnRefresh.textContent = '↺';
+  btnRefresh.title = '同じ候補数で再翻訳';
+  btnRefresh.addEventListener('click', () => {
+    if (_aiOriginalQuery) triggerLlmSearch(_aiOriginalQuery, _aiCandidateCount);
+  });
+
   container.appendChild(btnMinus);
   container.appendChild(countLabel);
   container.appendChild(btnPlus);
+  container.appendChild(btnRefresh);
   container.classList.remove('hidden');
 }
 
