@@ -363,6 +363,26 @@ body {
   border-color: var(--accent);
   color: #fff;
 }
+.search-ai-count-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+  line-height: 1;
+  padding: 1px 6px;
+  transition: border-color var(--t-fast), color var(--t-fast);
+}
+.search-ai-count-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.search-ai-count-btn:disabled { opacity: 0.35; cursor: default; }
+.search-ai-count-label {
+  color: var(--text-dim);
+  font-size: 10px;
+  padding: 0 1px;
+  align-self: center;
+}
 .search-results-list {
   list-style: none;
   overflow-y: auto;

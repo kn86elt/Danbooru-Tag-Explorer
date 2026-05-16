@@ -370,6 +370,7 @@ def on_app_started(demo, app):
             text    = (body.get("text") or "").strip()
             if not text:
                 return JSONResponse({"error": "text is required"}, status_code=400)
+            count   = max(1, min(int(body.get("count") or 3), 10))
             llm     = load_settings().get("llm", {})
             host    = (llm.get("host")    or "localhost").strip()
             port    = int(llm.get("port") or 11434)
@@ -383,20 +384,21 @@ def on_app_started(demo, app):
             extra_headers = {}
             if api_key and api_key.lower() != "none":
                 extra_headers["Authorization"] = f"Bearer {api_key}"
+            cand_ex = " | ".join(f"candidate{i+1}" for i in range(count))
             payload = {
                 "model": model,
                 "messages": [
                     {"role": "system", "content": (
                         "Convert Japanese text to English keywords for Danbooru image tags.\n"
-                        "For each concept output exactly one line: japanese_word: candidate1 | candidate2 | candidate3\n"
-                        "Provide up to 3 alternative English keywords separated by ' | '.\n"
+                        f"For each concept output exactly one line: japanese_word: {cand_ex}\n"
+                        f"Provide up to {count} alternative English keywords separated by ' | '.\n"
                         "IMPORTANT: Use the exact Japanese characters from the input. Do NOT convert to hiragana or katakana.\n"
                         "Use plain English words (no underscores). No explanation."
                     )},
                     {"role": "user",   "content": text},
                 ],
-                "temperature": 0.3,
-                "max_tokens":  300,
+                "temperature": 0.6,
+                "max_tokens":  150 + count * 30,
                 "stream":      False,
             }
             try:

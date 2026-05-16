@@ -1691,8 +1691,10 @@ function handleSearch(query, isAI = false) {
   els.searchOverlay.classList.remove('hidden');
 }
 
-let _llmSearchAbort = null;
-let _lastAiQuery    = null; // AI翻訳で得られた翻訳済みクエリ（Enter一覧表示に使用）
+let _llmSearchAbort   = null;
+let _lastAiQuery      = null; // AI翻訳で得られた翻訳済みクエリ（Enter一覧表示に使用）
+let _aiOriginalQuery  = null; // 元の日本語クエリ（[+][-]再翻訳に使用）
+let _aiCandidateCount = 3;    // 現在リクエスト中の候補数
 
 // boot後にサイレント実行: LLMサーバーが起動中でモデルが取得できればインメモリにセット。
 // モデル未設定時のみ動作し、設定はsettings.jsonに保存しない。
@@ -1840,6 +1842,35 @@ function renderAiCandidates(variants, activeIdx) {
     });
     container.appendChild(chip);
   });
+
+  // [+][-] 候補数増減ボタン
+  const btnMinus = document.createElement('button');
+  btnMinus.className = 'search-ai-count-btn';
+  btnMinus.textContent = '−';
+  btnMinus.title = '候補を減らして再翻訳';
+  btnMinus.disabled = _aiCandidateCount <= 1;
+  btnMinus.addEventListener('click', () => {
+    if (_aiOriginalQuery && _aiCandidateCount > 1)
+      triggerLlmSearch(_aiOriginalQuery, _aiCandidateCount - 1);
+  });
+
+  const countLabel = document.createElement('span');
+  countLabel.className = 'search-ai-count-label';
+  countLabel.textContent = `×${_aiCandidateCount}`;
+
+  const btnPlus = document.createElement('button');
+  btnPlus.className = 'search-ai-count-btn';
+  btnPlus.textContent = '+';
+  btnPlus.title = '候補を増やして再翻訳';
+  btnPlus.disabled = _aiCandidateCount >= 10;
+  btnPlus.addEventListener('click', () => {
+    if (_aiOriginalQuery && _aiCandidateCount < 10)
+      triggerLlmSearch(_aiOriginalQuery, _aiCandidateCount + 1);
+  });
+
+  container.appendChild(btnMinus);
+  container.appendChild(countLabel);
+  container.appendChild(btnPlus);
   container.classList.remove('hidden');
 }
 
@@ -1856,16 +1887,19 @@ function normalizeLlmTags(raw) {
 }
 
 
-async function triggerLlmSearch(query) {
+async function triggerLlmSearch(query, count) {
+  count = Math.max(1, Math.min(count ?? _aiCandidateCount, 10));
   if (_llmSearchAbort) _llmSearchAbort.abort();
   _llmSearchAbort = new AbortController();
+  _aiOriginalQuery  = query;
+  _aiCandidateCount = count;
   const hint = els.searchEnterHint;
   if (hint) hint.textContent = '🤖 翻訳中...';
   try {
     const res = await fetch('api/ai-translate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: query }),
+      body: JSON.stringify({ text: query, count }),
       signal: _llmSearchAbort.signal,
     });
     const data = await res.json();
@@ -2770,7 +2804,7 @@ els.globalSearch.addEventListener('input', e => {
   // Cancel any pending LLM search, reset translated query and candidate chips
   clearTimeout(_llmSearchDebounce);
   if (_llmSearchAbort) { _llmSearchAbort.abort(); _llmSearchAbort = null; }
-  _lastAiQuery = null;
+  _lastAiQuery = null; _aiOriginalQuery = null; _aiCandidateCount = 3;
   if (els.searchAiCandidates) { els.searchAiCandidates.classList.add('hidden'); els.searchAiCandidates.innerHTML = ''; }
 
   // Normal search (150ms)
@@ -2791,7 +2825,7 @@ els.searchClear.addEventListener('click', () => {
   els.searchAiBadge?.classList.add('hidden');
   clearTimeout(_llmSearchDebounce);
   if (_llmSearchAbort) { _llmSearchAbort.abort(); _llmSearchAbort = null; }
-  _lastAiQuery = null;
+  _lastAiQuery = null; _aiOriginalQuery = null; _aiCandidateCount = 3;
   if (els.searchAiCandidates) { els.searchAiCandidates.classList.add('hidden'); els.searchAiCandidates.innerHTML = ''; }
 });
 document.addEventListener('click', e => {
