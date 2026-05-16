@@ -288,8 +288,9 @@ const els = {
   searchOverlay:   $('search-results-overlay'),
   searchList:      $('search-results-list'),
   searchCount:     $('search-results-count'),
-  searchAiBadge:   $('search-ai-badge'),
-  searchEnterHint: $('search-enter-hint'),
+  searchAiBadge:      $('search-ai-badge'),
+  searchAiCandidates: $('search-ai-candidates'),
+  searchEnterHint:    $('search-enter-hint'),
   treeNav:         $('tree-nav'),
   expandAll:       $('expand-all'),
   collapseAll:     $('collapse-all'),
@@ -1713,6 +1714,8 @@ async function tryAutoDetectLlm() {
 
 // LLM出力を {ja, en} ペア配列に解析する。
 // "日本語: english keyword" 形式と従来のカンマ区切り形式の両方に対応。
+// "japanese: cand1 | cand2 | cand3" 形式を {ja, candidates[]} に解析。
+// 従来のカンマ/改行区切り形式にもフォールバック対応。
 function parseLlmOutput(raw) {
   const unescaped = raw.replace(/\\_/g, '_');
   const lines = unescaped.split('\n')
@@ -1720,18 +1723,16 @@ function parseLlmOutput(raw) {
     .filter(Boolean);
   const pairLines = lines.filter(l => l.includes(':'));
   if (pairLines.length >= Math.ceil(lines.length / 2)) {
-    const pairs = [];
-    for (const line of pairLines) {
+    return pairLines.map(line => {
       const colonIdx = line.indexOf(':');
       const ja = line.slice(0, colonIdx).trim();
-      line.slice(colonIdx + 1).split(',').map(t => t.trim()).filter(Boolean)
-        .forEach(en => pairs.push({ ja, en }));
-    }
-    return pairs;
+      const candidates = line.slice(colonIdx + 1)
+        .split('|').map(t => t.trim()).filter(Boolean);
+      return { ja, candidates: candidates.length ? candidates : [''] };
+    });
   }
-  // フォールバック: カンマ/改行区切りの英語タグ列
   return unescaped.split(/[,\n]/).map(t => t.trim()).filter(Boolean)
-    .map(en => ({ ja: '', en }));
+    .map(en => ({ ja: '', candidates: [en] }));
 }
 
 // state.translations (tagName→ja) の逆引きMap (ja→[tagName,...]) をキャッシュ構築。
@@ -1780,9 +1781,66 @@ function resolveToDbTag(enTerm) {
   return underscored;
 }
 
-// ペアを解決: 日本語逆引き優先、失敗時は英語から解決。
-function resolvePair({ ja, en }) {
-  return resolveByJa(ja) ?? resolveToDbTag(en);
+// ペアを解決: 日本語逆引き優先、失敗時は最初の候補から解決。
+function resolvePair({ ja, candidates }) {
+  return resolveByJa(ja) ?? resolveToDbTag(candidates[0] ?? '');
+}
+
+// 全候補を解決してユニークなDanbooruタグ名リストを返す。
+function resolveAllCandidates({ ja, candidates }) {
+  const results = [];
+  const seen = new Set();
+  const jaResolved = resolveByJa(ja);
+  if (jaResolved) { seen.add(jaResolved); results.push(jaResolved); }
+  for (const c of candidates) {
+    if (!c) continue;
+    const r = resolveToDbTag(c);
+    if (!seen.has(r)) { seen.add(r); results.push(r); }
+  }
+  return results.length ? results : [resolveToDbTag(candidates[0] ?? '')];
+}
+
+// 各コンセプトの候補セットからクエリバリアント文字列の配列を生成する。
+// 例: [['a','b'], ['x','y']] → ['a x', 'a y', 'b x', 'b y'] (最大16件)
+function buildQueryVariants(sets) {
+  let variants = [''];
+  for (const cands of sets) {
+    const next = [];
+    for (const existing of variants) {
+      for (const c of cands) {
+        next.push(existing ? existing + ' ' + c : c);
+      }
+    }
+    variants = next;
+    if (variants.length > 16) { variants = variants.slice(0, 16); break; }
+  }
+  return variants;
+}
+
+// AI候補チップを検索オーバーレイに描画する。
+function renderAiCandidates(variants, activeIdx) {
+  const container = els.searchAiCandidates;
+  if (!container) return;
+  if (!variants || variants.length <= 1) {
+    container.classList.add('hidden');
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = '';
+  variants.forEach((v, i) => {
+    const chip = document.createElement('button');
+    chip.className = 'search-ai-chip' + (i === (activeIdx ?? 0) ? ' active' : '');
+    chip.textContent = v;
+    chip.addEventListener('click', () => {
+      container.querySelectorAll('.search-ai-chip').forEach((c, j) => {
+        c.classList.toggle('active', j === i);
+      });
+      _lastAiQuery = v;
+      handleSearch(v, true);
+    });
+    container.appendChild(chip);
+  });
+  container.classList.remove('hidden');
 }
 
 // LLM出力を正規化してdisplay用文字列に変換:
@@ -1796,6 +1854,7 @@ function normalizeLlmTags(raw) {
   });
   return tags.length ? tags.join(', ') + ',' : '';
 }
+
 
 async function triggerLlmSearch(query) {
   if (_llmSearchAbort) _llmSearchAbort.abort();
@@ -1811,9 +1870,14 @@ async function triggerLlmSearch(query) {
     });
     const data = await res.json();
     if (!data.tags) return;
-    const translated = parseLlmOutput(data.tags).map(resolvePair).join(' ');
-    _lastAiQuery = translated;
-    handleSearch(translated, true);
+    const pairs = parseLlmOutput(data.tags);
+    // 各コンセプトの全候補を解決し、クエリバリアントを生成
+    const candidateSets = pairs.map(resolveAllCandidates);
+    const variants = buildQueryVariants(candidateSets);
+    const primary = variants[0] ?? '';
+    _lastAiQuery = primary;
+    handleSearch(primary, true);
+    renderAiCandidates(variants, 0);
   } catch (e) {
     if (e.name !== 'AbortError') {} // silent fallback
   } finally {
@@ -2701,10 +2765,11 @@ els.globalSearch.addEventListener('input', e => {
   const val = e.target.value;
   const trimmed = val.trim();
 
-  // Cancel any pending LLM search, reset translated query
+  // Cancel any pending LLM search, reset translated query and candidate chips
   clearTimeout(_llmSearchDebounce);
   if (_llmSearchAbort) { _llmSearchAbort.abort(); _llmSearchAbort = null; }
   _lastAiQuery = null;
+  if (els.searchAiCandidates) { els.searchAiCandidates.classList.add('hidden'); els.searchAiCandidates.innerHTML = ''; }
 
   // Normal search (150ms)
   clearTimeout(state.searchDebounce);
@@ -2725,6 +2790,7 @@ els.searchClear.addEventListener('click', () => {
   clearTimeout(_llmSearchDebounce);
   if (_llmSearchAbort) { _llmSearchAbort.abort(); _llmSearchAbort = null; }
   _lastAiQuery = null;
+  if (els.searchAiCandidates) { els.searchAiCandidates.classList.add('hidden'); els.searchAiCandidates.innerHTML = ''; }
 });
 document.addEventListener('click', e => {
   if (!els.searchOverlay.contains(e.target) && e.target !== els.globalSearch) {
