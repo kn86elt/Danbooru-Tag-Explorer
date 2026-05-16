@@ -370,7 +370,7 @@ def on_app_started(demo, app):
             text    = (body.get("text") or "").strip()
             if not text:
                 return JSONResponse({"error": "text is required"}, status_code=400)
-            count   = max(1, min(int(body.get("count") or 3), 10))
+            free_mode = "systemPrompt" in body
             llm     = load_settings().get("llm", {})
             host    = (llm.get("host")    or "localhost").strip()
             port    = int(llm.get("port") or 11434)
@@ -384,27 +384,39 @@ def on_app_started(demo, app):
             extra_headers = {}
             if api_key and api_key.lower() != "none":
                 extra_headers["Authorization"] = f"Bearer {api_key}"
-            cand_ex = " | ".join(f"candidate{i+1}" for i in range(count))
+            if free_mode:
+                sp = (body.get("systemPrompt") or "").strip()
+                system_content = sp if sp else "You are a helpful assistant."
+                temperature = 0.7
+                max_tokens  = 800
+            else:
+                count = max(1, min(int(body.get("count") or 3), 10))
+                cand_ex = " | ".join(f"candidate{i+1}" for i in range(count))
+                system_content = (
+                    "Convert Japanese text to English keywords for Danbooru image tags.\n"
+                    f"For each concept output exactly one line: japanese_word: {cand_ex}\n"
+                    f"Provide up to {count} alternative English keywords separated by ' | '.\n"
+                    "IMPORTANT: Use the exact Japanese characters from the input. Do NOT convert to hiragana or katakana.\n"
+                    "Use plain English words (no underscores). No explanation."
+                )
+                temperature = 0.6
+                max_tokens  = 150 + count * 30
             payload = {
                 "model": model,
                 "messages": [
-                    {"role": "system", "content": (
-                        "Convert Japanese text to English keywords for Danbooru image tags.\n"
-                        f"For each concept output exactly one line: japanese_word: {cand_ex}\n"
-                        f"Provide up to {count} alternative English keywords separated by ' | '.\n"
-                        "IMPORTANT: Use the exact Japanese characters from the input. Do NOT convert to hiragana or katakana.\n"
-                        "Use plain English words (no underscores). No explanation."
-                    )},
+                    {"role": "system", "content": system_content},
                     {"role": "user",   "content": text},
                 ],
-                "temperature": 0.6,
-                "max_tokens":  150 + count * 30,
+                "temperature": temperature,
+                "max_tokens":  max_tokens,
                 "stream":      False,
             }
             try:
                 result = _http_post(url, payload, timeout=timeout, extra_headers=extra_headers)
-                tags = result["choices"][0]["message"]["content"].strip()
-                return JSONResponse({"tags": tags})
+                content = result["choices"][0]["message"]["content"].strip()
+                if free_mode:
+                    return JSONResponse({"reply": content})
+                return JSONResponse({"tags": content})
             except Exception as e:
                 return JSONResponse({"error": str(e)}, status_code=500)
 

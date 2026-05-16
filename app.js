@@ -2268,6 +2268,7 @@ function renderLlmTagList() {
 
 // LLM連携タブのグループ状態: 変換後に設定、クリア/手動編集時に null
 let _llmTagGroups = null; // [{ja, items:[{resolved,isKnown}], activeIdx}] | null
+let _llmFreeMode  = false; // true when /-prefix free-form mode is active
 
 // グループ状態をtextareaに反映する
 function syncLlmGroupsToTextarea() {
@@ -2286,6 +2287,10 @@ function renderLlmTagGroups() {
   const list = els.llmTagList;
   if (!list) return;
   list.innerHTML = '';
+
+  if (_llmFreeMode) {
+    return;
+  }
 
   if (!_llmTagGroups) {
     // グループなし（手動編集モード）: 既存フラットリストにフォールバック
@@ -2591,8 +2596,22 @@ function initLlmConvert() {
   const btn = els.llmConvertBtn;
   if (!btn) return;
   btn.addEventListener('click', async () => {
-    const text = els.llmJpInput?.value.trim();
-    if (!text) { showToast('日本語テキストを入力してください'); return; }
+    const rawInput = els.llmJpInput?.value ?? '';
+    const lines = rawInput.split('\n');
+    const firstLine = lines[0];
+    let userText, reqBody, isFreeMode;
+    if (firstLine.trimStart().startsWith('/')) {
+      isFreeMode = true;
+      const sp = firstLine.trimStart().slice(1).trim();
+      userText = lines.slice(1).join('\n').trim();
+      if (!userText) { showToast('テキストを入力してください'); return; }
+      reqBody = { text: userText, systemPrompt: sp };
+    } else {
+      isFreeMode = false;
+      userText = rawInput.trim();
+      if (!userText) { showToast('日本語テキストを入力してください'); return; }
+      reqBody = { text: userText };
+    }
     const label = btn.querySelector('.btn-label');
     const origText = label?.textContent ?? '変換';
     btn.disabled = true;
@@ -2601,18 +2620,26 @@ function initLlmConvert() {
       const res = await fetch('api/ai-translate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify(reqBody),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      const pairs = parseLlmOutput(data.tags);
-      _llmTagGroups = pairs.map(pair => ({
-        ja: pair.ja,
-        items: resolveAllCandidatesForLlm(pair),
-        activeIdx: 0,
-      }));
-      syncLlmGroupsToTextarea();
-      renderLlmTagGroups();
+      if (isFreeMode) {
+        _llmFreeMode  = true;
+        _llmTagGroups = null;
+        if (els.llmTagOutput) els.llmTagOutput.value = data.reply ?? '';
+        renderLlmTagGroups();
+      } else {
+        _llmFreeMode = false;
+        const pairs = parseLlmOutput(data.tags);
+        _llmTagGroups = pairs.map(pair => ({
+          ja: pair.ja,
+          items: resolveAllCandidatesForLlm(pair),
+          activeIdx: 0,
+        }));
+        syncLlmGroupsToTextarea();
+        renderLlmTagGroups();
+      }
     } catch (e) {
       showToast(`変換失敗: ${e.message}`);
     } finally {
@@ -2632,6 +2659,7 @@ function initLlmConvert() {
   els.llmClearBtn?.addEventListener('click', () => {
     if (els.llmJpInput)   els.llmJpInput.value  = '';
     if (els.llmTagOutput) els.llmTagOutput.value = '';
+    _llmFreeMode  = false;
     _llmTagGroups = null;
     renderLlmTagGroups();
     showToast('🗑 クリアしました');
@@ -3118,7 +3146,8 @@ els.scratchpadInput.addEventListener('input', (e) => {
 });
 
 els.llmTagOutput?.addEventListener('input', () => {
-  // 手動編集時: グループ構造を解除してフラットリストに戻す
+  // 手動編集時: グループ構造・フリーモードを解除してフラットリストに戻す
+  _llmFreeMode  = false;
   _llmTagGroups = null;
   renderLlmTagGroups();
 });
