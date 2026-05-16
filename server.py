@@ -14,6 +14,7 @@ Usage:
 """
 
 import json
+import random
 import socket
 import threading
 import time
@@ -246,8 +247,11 @@ def api_ai_translate():
         ],
         "temperature": temperature,
         "max_tokens":  max_tokens,
+        "seed":        random.randint(0, 2**31 - 1) if free_mode else None,
         "stream":      False,
     }
+    if payload["seed"] is None:
+        del payload["seed"]
     try:
         result = _http_post(url, payload, timeout=timeout, extra_headers=extra_headers)
         content = result["choices"][0]["message"]["content"].strip()

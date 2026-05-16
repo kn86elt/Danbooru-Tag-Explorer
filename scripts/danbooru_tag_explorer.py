@@ -23,6 +23,7 @@ A1111モードでは CSV は専用エンドポイント (/api/csv/danbooru, /api
 """
 
 import json
+import random
 import re
 import traceback
 import urllib.request
@@ -409,8 +410,11 @@ def on_app_started(demo, app):
                 ],
                 "temperature": temperature,
                 "max_tokens":  max_tokens,
+                "seed":        random.randint(0, 2**31 - 1) if free_mode else None,
                 "stream":      False,
             }
+            if payload["seed"] is None:
+                del payload["seed"]
             try:
                 result = _http_post(url, payload, timeout=timeout, extra_headers=extra_headers)
                 content = result["choices"][0]["message"]["content"].strip()
