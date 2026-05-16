@@ -387,7 +387,7 @@ def on_app_started(demo, app):
             if free_mode:
                 sp = (body.get("systemPrompt") or "").strip()
                 system_content = sp if sp else "You are a helpful assistant. Keep your response concise and brief, within a few lines."
-                temperature = 0.7
+                temperature = 0.9
                 max_tokens  = 800
             else:
                 count = max(1, min(int(body.get("count") or 3), 10))
