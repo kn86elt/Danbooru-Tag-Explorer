@@ -1402,6 +1402,45 @@ body {
   background: var(--surface3);
 }
 
+/* LLM連携タブ: 候補グループ */
+.llm-tag-group { margin-bottom: 0; }
+.llm-group-sep {
+  border-top: 1px solid var(--border);
+  margin: 3px 2px;
+  opacity: 0.5;
+}
+.llm-candidate-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 6px;
+  border-radius: 3px;
+  min-height: 22px;
+}
+.llm-candidate-row.active { background: var(--surface2); }
+.llm-candidate-row.dim {
+  opacity: 0.4;
+  cursor: pointer;
+}
+.llm-candidate-row.dim:hover {
+  opacity: 0.75;
+  background: var(--surface2);
+}
+.llm-candidate-name {
+  flex: 1;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  cursor: pointer;
+}
+.llm-candidate-name.unknown {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
 /* ---- Scratchpad tabs ---- */
 .scratchpad-tabs {
   display: flex;

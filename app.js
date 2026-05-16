@@ -1788,6 +1788,26 @@ function resolvePair({ ja, candidates }) {
   return resolveByJa(ja) ?? resolveToDbTag(candidates[0] ?? '');
 }
 
+// LLM連携タブ専用の厳密解決: アンダースコア分割後の完全一致のみ。
+// resolveToDbTag のサブストリングマッチによる誤検出（例: 'arknights'⊃'night'）を防ぐ。
+// 一致なし時は null を返す（呼び出し側がフォールバック処理）。
+function resolveToDbTagStrict(enTerm) {
+  const underscored = enTerm.toLowerCase().replace(/\s+/g, '_');
+  if (state.tagMeta.has(underscored)) return underscored;
+  const tokens = underscored.split('_').filter(Boolean);
+  if (tokens.length > 1) {
+    let best = null, bestCount = -1;
+    for (const [name, meta] of state.tagMeta) {
+      const parts = name.split(/[_()\[\]]/g).filter(Boolean);
+      if (tokens.every(t => parts.includes(t)) && meta.count > bestCount) {
+        bestCount = meta.count; best = name;
+      }
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
 // 全候補を解決してユニークなDanbooruタグ名リストを返す。
 function resolveAllCandidates({ ja, candidates }) {
   const results = [];
@@ -1800,6 +1820,33 @@ function resolveAllCandidates({ ja, candidates }) {
     if (!seen.has(r)) { seen.add(r); results.push(r); }
   }
   return results.length ? results : [resolveToDbTag(candidates[0] ?? '')];
+}
+
+// LLM連携タブ専用の候補解決。厳密解決優先、失敗時は正規化文字列をフォールバックとして追加。
+// 戻り値: { resolved: string, isKnown: boolean }[]
+function resolveAllCandidatesForLlm({ ja, candidates }) {
+  const results = [];
+  const seen = new Set();
+  const add = (resolved, isKnown) => {
+    if (!resolved || seen.has(resolved)) return;
+    seen.add(resolved); results.push({ resolved, isKnown });
+  };
+  // 日本語逆引き（最優先）
+  const jaResolved = resolveByJa(ja);
+  if (jaResolved) add(jaResolved, true);
+  // 各英語候補: 厳密解決優先、失敗時は正規化文字列を追加
+  for (const c of candidates) {
+    if (!c) continue;
+    const strict = resolveToDbTagStrict(c);
+    if (strict) { add(strict, true); continue; }
+    const fallback = c.toLowerCase().replace(/\s+/g, '_');
+    add(fallback, state.tagMeta.has(fallback));
+  }
+  if (results.length === 0) {
+    const fb = (candidates[0] ?? '').toLowerCase().replace(/\s+/g, '_');
+    add(fb, state.tagMeta.has(fb));
+  }
+  return results;
 }
 
 // 各コンセプトの候補セットからクエリバリアント文字列の配列を生成する。
@@ -2219,6 +2266,96 @@ function renderLlmTagList() {
   }
 }
 
+// LLM連携タブのグループ状態: 変換後に設定、クリア/手動編集時に null
+let _llmTagGroups = null; // [{ja, items:[{resolved,isKnown}], activeIdx}] | null
+
+// グループ状態をtextareaに反映する
+function syncLlmGroupsToTextarea() {
+  if (!_llmTagGroups || !els.llmTagOutput) return;
+  const replaceUs = els.replaceUnderscore?.checked ?? false;
+  const tags = _llmTagGroups.map(g => {
+    const r = g.items[g.activeIdx]?.resolved ?? '';
+    return replaceUs ? r.replace(/_/g, ' ') : r;
+  }).filter(Boolean);
+  // textareaのinputイベントでグループが解除されないよう直接セット
+  els.llmTagOutput.value = tags.length ? tags.join(', ') + ',' : '';
+}
+
+// LLM連携タブ専用: グループ形式でタグリストを描画する
+function renderLlmTagGroups() {
+  const list = els.llmTagList;
+  if (!list) return;
+  list.innerHTML = '';
+
+  if (!_llmTagGroups) {
+    // グループなし（手動編集モード）: 既存フラットリストにフォールバック
+    renderLlmTagList();
+    return;
+  }
+
+  const replaceUs = els.replaceUnderscore?.checked ?? false;
+
+  _llmTagGroups.forEach((group, gi) => {
+    const groupEl = document.createElement('div');
+    groupEl.className = 'llm-tag-group';
+
+    group.items.forEach(({ resolved, isKnown }, ci) => {
+      const isActive = ci === group.activeIdx;
+      const row = document.createElement('div');
+      row.className = 'llm-candidate-row' + (isActive ? ' active' : ' dim');
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'llm-candidate-name' + (isKnown ? '' : ' unknown');
+      nameEl.textContent = replaceUs ? resolved.replace(/_/g, ' ') : resolved;
+      nameEl.title = resolved;
+      nameEl.addEventListener('click', e => {
+        e.stopPropagation();
+        openTagDetail(resolved, state.tagNodes.get(resolved)?.breadcrumb);
+      });
+      if (!isCoarsePointer()) {
+        nameEl.addEventListener('mouseenter', () => {
+          const rect = nameEl.getBoundingClientRect();
+          showWikiPreview(null, { name: resolved }, state.tagMeta.get(resolved), {
+            fixedPos: { x: Math.max(8, rect.left - 348), y: Math.min(rect.top, window.innerHeight - 260) },
+          });
+        });
+        nameEl.addEventListener('mouseleave', () => hideWikiPreview());
+      }
+      row.appendChild(nameEl);
+
+      if (isActive) {
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'scratchpad-tag-remove';
+        removeBtn.textContent = '×';
+        removeBtn.title = 'このコンセプトを削除';
+        removeBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          _llmTagGroups.splice(gi, 1);
+          syncLlmGroupsToTextarea();
+          renderLlmTagGroups();
+        });
+        row.appendChild(removeBtn);
+      } else {
+        // 非アクティブ候補: クリックでアクティブに切り替え
+        row.addEventListener('click', () => {
+          group.activeIdx = ci;
+          syncLlmGroupsToTextarea();
+          renderLlmTagGroups();
+        });
+      }
+      groupEl.appendChild(row);
+    });
+
+    if (gi < _llmTagGroups.length - 1) {
+      const sep = document.createElement('div');
+      sep.className = 'llm-group-sep';
+      groupEl.appendChild(sep);
+    }
+
+    list.appendChild(groupEl);
+  });
+}
+
 function toggleTagInScratchpad(name) {
   const tagText    = formatTagForExport(name);                    // 比較・削除用（カンマなし）
   const formatted  = formatTagForExport(name, { withComma: true }); // 挿入用（カンマあり）
@@ -2462,10 +2599,14 @@ function initLlmConvert() {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      if (els.llmTagOutput) {
-        els.llmTagOutput.value = normalizeLlmTags(data.tags);
-        els.llmTagOutput.dispatchEvent(new Event('input'));
-      }
+      const pairs = parseLlmOutput(data.tags);
+      _llmTagGroups = pairs.map(pair => ({
+        ja: pair.ja,
+        items: resolveAllCandidatesForLlm(pair),
+        activeIdx: 0,
+      }));
+      syncLlmGroupsToTextarea();
+      renderLlmTagGroups();
     } catch (e) {
       showToast(`変換失敗: ${e.message}`);
     } finally {
@@ -2483,9 +2624,10 @@ function initLlmConvert() {
 
   // LLMタブ: クリアボタン（入力・出力両方クリア）
   els.llmClearBtn?.addEventListener('click', () => {
-    if (els.llmJpInput)    els.llmJpInput.value    = '';
-    if (els.llmTagOutput)  els.llmTagOutput.value   = '';
-    renderLlmTagList();
+    if (els.llmJpInput)   els.llmJpInput.value  = '';
+    if (els.llmTagOutput) els.llmTagOutput.value = '';
+    _llmTagGroups = null;
+    renderLlmTagGroups();
     showToast('🗑 クリアしました');
   });
 
@@ -2969,7 +3111,11 @@ els.scratchpadInput.addEventListener('input', (e) => {
   renderScratchpadTagList();
 });
 
-els.llmTagOutput?.addEventListener('input', renderLlmTagList);
+els.llmTagOutput?.addEventListener('input', () => {
+  // 手動編集時: グループ構造を解除してフラットリストに戻す
+  _llmTagGroups = null;
+  renderLlmTagGroups();
+});
 
 els.scratchpadFormatBtn?.addEventListener('click', formatScratchpad);
 
