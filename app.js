@@ -1691,6 +1691,7 @@ function handleSearch(query, isAI = false) {
 }
 
 let _llmSearchAbort = null;
+let _lastAiQuery    = null; // AI翻訳で得られた翻訳済みクエリ（Enter一覧表示に使用）
 
 // boot後にサイレント実行: LLMサーバーが起動中でモデルが取得できればインメモリにセット。
 // モデル未設定時のみ動作し、設定はsettings.jsonに保存しない。
@@ -1811,6 +1812,7 @@ async function triggerLlmSearch(query) {
     const data = await res.json();
     if (!data.tags) return;
     const translated = parseLlmOutput(data.tags).map(resolvePair).join(' ');
+    _lastAiQuery = translated;
     handleSearch(translated, true);
   } catch (e) {
     if (e.name !== 'AbortError') {} // silent fallback
@@ -2699,9 +2701,10 @@ els.globalSearch.addEventListener('input', e => {
   const val = e.target.value;
   const trimmed = val.trim();
 
-  // Cancel any pending LLM search
+  // Cancel any pending LLM search, reset translated query
   clearTimeout(_llmSearchDebounce);
   if (_llmSearchAbort) { _llmSearchAbort.abort(); _llmSearchAbort = null; }
+  _lastAiQuery = null;
 
   // Normal search (150ms)
   clearTimeout(state.searchDebounce);
@@ -2721,6 +2724,7 @@ els.searchClear.addEventListener('click', () => {
   els.searchAiBadge?.classList.add('hidden');
   clearTimeout(_llmSearchDebounce);
   if (_llmSearchAbort) { _llmSearchAbort.abort(); _llmSearchAbort = null; }
+  _lastAiQuery = null;
 });
 document.addEventListener('click', e => {
   if (!els.searchOverlay.contains(e.target) && e.target !== els.globalSearch) {
@@ -2734,11 +2738,12 @@ els.globalSearch.addEventListener('keydown', e => {
   } else if (e.key === 'Enter') {
     const query = els.globalSearch.value.trim();
     if (query) {
-      addHistorySearch(query); // ← record search in history
+      addHistorySearch(query);
       els.searchOverlay.classList.add('hidden');
       els.globalSearch.value = '';
       els.globalSearch.blur();
-      navigateTo(['__search_query__', query]);
+      navigateTo(['__search_query__', _lastAiQuery ?? query]);
+      _lastAiQuery = null;
     }
   }
 });
@@ -2751,7 +2756,8 @@ els.searchEnterHint.addEventListener('click', () => {
     els.searchOverlay.classList.add('hidden');
     els.globalSearch.value = '';
     els.globalSearch.blur();
-    navigateTo(['__search_query__', query]);
+    navigateTo(['__search_query__', _lastAiQuery ?? query]);
+    _lastAiQuery = null;
   }
 });
 
