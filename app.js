@@ -3492,9 +3492,11 @@ function initA1111Mode() {
   els.scratchpadInput.addEventListener('input', updateSendBtnDirty);
 }
 
-// Keyboard shortcut: / to focus search
+// Keyboard shortcut: / to focus search (skip when typing in any input/textarea)
 document.addEventListener('keydown', e => {
-  if (e.key === '/' && document.activeElement !== els.globalSearch) {
+  const active = document.activeElement;
+  if (e.key === '/' && active !== els.globalSearch &&
+      active?.tagName !== 'INPUT' && active?.tagName !== 'TEXTAREA') {
     e.preventDefault();
     els.globalSearch.focus();
     els.globalSearch.select();
