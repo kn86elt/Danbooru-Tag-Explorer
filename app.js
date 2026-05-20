@@ -769,7 +769,13 @@ function renderHistoryNav() {
   if (f.search) renderHistoryGroup('🔍', searches.map(e => ({
     label: `"${e.q}"`,
     sublabel: '',
-    onNavigate: () => navigateTo(['__search_query__', e.q]),
+    onNavigate: () => {
+      if (els.globalSearch) {
+        els.globalSearch.value = e.q;
+        els.globalSearch.focus();
+      }
+      handleSearch(e.q);
+    },
     onDelete: () => {
       const idx = state.history.searches.findIndex(x => x.q === e.q && x.t === e.t);
       if (idx !== -1) state.history.searches.splice(idx, 1);
