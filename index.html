@@ -36,7 +36,7 @@
           spellcheck="false"
         />
         <button id="search-clear" class="search-clear" title="クリア" aria-label="検索クリア">✕</button>
-        <button id="search-llm-btn" class="search-llm-btn" title="LLMで翻訳して検索">🤖</button>
+        <button id="search-llm-btn" class="search-llm-btn" title="LLMで翻訳して検索"><span class="search-llm-icon">🤖</span><span class="llm-spinner hidden" id="search-llm-spinner"></span></button>
       </div>
     </div>
     <div class="header-right">
@@ -317,6 +317,7 @@
       <div class="scratchpad-actions">
         <button id="llm-convert-btn" class="btn-icon hidden" title="LLMでタグに変換">
           <span class="btn-icon-inner">→</span>
+          <span class="llm-spinner hidden" id="llm-convert-spinner"></span>
           <span class="btn-label">変換</span>
         </button>
         <button id="llm-copy-btn" class="btn-icon hidden" title="変換結果をコピー">

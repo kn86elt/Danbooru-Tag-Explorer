@@ -196,6 +196,18 @@ body {
   transition: opacity var(--t-fast);
 }
 .search-llm-btn:hover { opacity: 1; }
+.llm-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--surface3);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.llm-spinner.hidden { display: none; }
 
 /* Tag count badge */
 .tag-count-badge {

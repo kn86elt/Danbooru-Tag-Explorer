@@ -1952,6 +1952,10 @@ async function triggerLlmSearch(query, count) {
   localStorage.setItem('dte_aiCandidateCount', count);
   const hint = els.searchEnterHint;
   if (hint) hint.textContent = '🤖 翻訳中...';
+  const _srchSpinner = document.getElementById('search-llm-spinner');
+  const _srchIcon    = els.searchLlmBtn?.querySelector('.search-llm-icon');
+  if (_srchSpinner) _srchSpinner.classList.remove('hidden');
+  if (_srchIcon)    _srchIcon.classList.add('hidden');
   try {
     const res = await fetch('api/ai-translate', {
       method: 'POST',
@@ -1975,6 +1979,8 @@ async function triggerLlmSearch(query, count) {
     if (e.name !== 'AbortError') {} // silent fallback
   } finally {
     if (hint) hint.textContent = '↵ Enter で一覧表示';
+    if (_srchSpinner) _srchSpinner.classList.add('hidden');
+    if (_srchIcon)    _srchIcon.classList.remove('hidden');
     _llmSearchAbort = null;
   }
 }
@@ -2613,9 +2619,11 @@ function initLlmConvert() {
       reqBody = { text: userText };
     }
     const label = btn.querySelector('.btn-label');
+    const convertSpinner = document.getElementById('llm-convert-spinner');
     const origText = label?.textContent ?? '変換';
     btn.disabled = true;
     if (label) label.textContent = '変換中...';
+    if (convertSpinner) convertSpinner.classList.remove('hidden');
     try {
       const res = await fetch('api/ai-translate', {
         method: 'POST',
@@ -2645,6 +2653,7 @@ function initLlmConvert() {
     } finally {
       btn.disabled = false;
       if (label) label.textContent = origText;
+      if (convertSpinner) convertSpinner.classList.add('hidden');
     }
   });
 
