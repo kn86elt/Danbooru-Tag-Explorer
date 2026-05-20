@@ -770,11 +770,21 @@ function renderHistoryNav() {
     label: `"${e.q}"`,
     sublabel: '',
     onNavigate: () => {
+      clearTimeout(_llmSearchDebounce);
+      clearTimeout(state.searchDebounce);
+      if (_llmSearchAbort) { _llmSearchAbort.abort(); _llmSearchAbort = null; }
+      _lastAiQuery = null; _aiOriginalQuery = null;
+      if (els.searchAiCandidates) { els.searchAiCandidates.classList.add('hidden'); els.searchAiCandidates.innerHTML = ''; }
       if (els.globalSearch) {
         els.globalSearch.value = e.q;
         els.globalSearch.focus();
       }
       handleSearch(e.q);
+      const trimmed = e.q.trim();
+      const count = parseInt(els.searchCount?.textContent, 10) || 0;
+      if (trimmed && /[぀-ヿ一-龯]/.test(trimmed) && (state.llmConfig?.model || _mode === 'a1111') && count === 0) {
+        triggerLlmSearch(trimmed);
+      }
     },
     onDelete: () => {
       const idx = state.history.searches.findIndex(x => x.q === e.q && x.t === e.t);
@@ -3013,7 +3023,7 @@ els.globalSearch.addEventListener('input', e => {
   state.searchDebounce = setTimeout(() => handleSearch(val), 150);
 
   // Japanese LLM auto-translate: 800ms debounce after last keystroke
-  if (trimmed && /[぀-ヿ一-龯]/.test(trimmed) && state.llmConfig?.model) {
+  if (trimmed && /[぀-ヿ一-龯]/.test(trimmed) && (state.llmConfig?.model || _mode === 'a1111')) {
     _llmSearchDebounce = setTimeout(() => {
       const count = parseInt(els.searchCount?.textContent, 10) || 0;
       if (count === 0) triggerLlmSearch(trimmed);
