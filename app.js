@@ -1972,6 +1972,7 @@ async function triggerLlmSearch(query, count) {
   const _srchIcon    = els.searchLlmBtn?.querySelector('.search-llm-icon');
   if (_srchSpinner) _srchSpinner.classList.remove('hidden');
   if (_srchIcon)    _srchIcon.classList.add('hidden');
+  let _errorMsg = null;
   try {
     const res = await fetch('api/ai-translate', {
       method: 'POST',
@@ -1980,6 +1981,7 @@ async function triggerLlmSearch(query, count) {
       signal: _llmSearchAbort.signal,
     });
     const data = await res.json();
+    if (data.error) { _errorMsg = data.error === 'モデルが設定されていません' ? 'モデルが設定されていません' : 'LLMと通信できません'; return; }
     if (!data.tags) return;
     const pairs = parseLlmOutput(data.tags);
     // 各コンセプトの全候補を解決し、クエリバリアントを生成
@@ -1992,9 +1994,9 @@ async function triggerLlmSearch(query, count) {
     handleSearch(primary, true);
     renderAiCandidates(variants, 0);
   } catch (e) {
-    if (e.name !== 'AbortError') {} // silent fallback
+    if (e.name !== 'AbortError') _errorMsg = 'LLMと通信できません';
   } finally {
-    if (hint) hint.textContent = '↵ Enter で一覧表示';
+    if (hint) hint.textContent = _errorMsg ?? '↵ Enter で一覧表示';
     if (_srchSpinner) _srchSpinner.classList.add('hidden');
     if (_srchIcon)    _srchIcon.classList.remove('hidden');
     _llmSearchAbort = null;
@@ -2636,10 +2638,10 @@ function initLlmConvert() {
     }
     const label = btn.querySelector('.btn-label');
     const convertSpinner = document.getElementById('llm-convert-spinner');
-    const origText = label?.textContent ?? '変換';
     btn.disabled = true;
     if (label) label.textContent = '変換中...';
     if (convertSpinner) convertSpinner.classList.remove('hidden');
+    let _errorMsg = null;
     try {
       const res = await fetch('api/ai-translate', {
         method: 'POST',
@@ -2665,10 +2667,10 @@ function initLlmConvert() {
         renderLlmTagGroups();
       }
     } catch (e) {
-      showToast(`変換失敗: ${e.message}`);
+      _errorMsg = e.message === 'モデルが設定されていません' ? 'モデルが設定されていません' : 'LLMと通信できません';
     } finally {
       btn.disabled = false;
-      if (label) label.textContent = origText;
+      if (label) label.textContent = _errorMsg ?? '変換';
       if (convertSpinner) convertSpinner.classList.add('hidden');
     }
   });
