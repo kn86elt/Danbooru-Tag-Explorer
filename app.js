@@ -2649,8 +2649,11 @@ function initLlmConvert() {
   }
 
   function getSkillFilter() {
-    const lines = (els.llmJpInput?.value ?? '').split('\n');
+    const ta = els.llmJpInput;
+    if (!ta) return null;
+    const lines = ta.value.split('\n');
     if (!lines[0].trimStart().startsWith('/')) return null;
+    if (ta.selectionStart > lines[0].length) return null;
     return lines[0].trimStart().slice(1).toLowerCase();
   }
 
@@ -2696,7 +2699,7 @@ function initLlmConvert() {
       (s.description || '').toLowerCase().includes(filter)
     );
     _skillItems    = matched;
-    _skillFocusIdx = matched.length > 0 ? 0 : -1;
+    _skillFocusIdx = -1;
     _skillDropdown.innerHTML = '';
     if (matched.length === 0) { hideSkillDropdown(); return; }
     matched.forEach((skill, i) => {
