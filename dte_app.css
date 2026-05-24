@@ -2254,10 +2254,10 @@ body {
 .skill-dropdown {
   position: absolute;
   z-index: 9999;
-  background: var(--bg-panel, #2a2a2a);
-  border: 1px solid var(--border, #444);
+  background: var(--surface2);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
   max-height: 240px;
   overflow-y: auto;
 }
@@ -2269,17 +2269,19 @@ body {
   grid-template-columns: auto 1fr;
   gap: 0 8px;
   align-items: baseline;
+  color: var(--text);
 }
 .skill-dropdown-item:hover,
 .skill-dropdown-item.focused {
-  background: var(--bg-hover, #3a3a3a);
+  background: var(--accent-dim);
+  color: var(--text);
 }
 .skill-dropdown-label { font-weight: 600; font-size: 13px; }
-.skill-dropdown-id    { font-size: 0.78em; color: var(--text-muted, #888); }
+.skill-dropdown-id    { font-size: 0.78em; color: var(--text-muted); }
 .skill-dropdown-desc  {
   grid-column: 1 / -1;
   font-size: 0.75em;
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
