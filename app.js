@@ -131,6 +131,7 @@ const state = {
     preset: 'ollama', host: 'localhost', port: 11434,
     path: '/v1', apiKey: '', model: '', timeout: 30,
   },
+  skills: [],
 };
 
 // ── Persistence helpers ─────────────────────────────────────────────────────
@@ -445,6 +446,7 @@ async function boot() {
 
     if (_mode === 'a1111') initA1111Mode();
     tryAutoDetectLlm(); // non-blocking: サイレントでモデル自動検出
+    loadSkills();       // non-blocking: スキル定義を取得
 
     state.observer = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting) {
@@ -1730,6 +1732,18 @@ async function tryAutoDetectLlm() {
   } catch (e) { /* LLM未起動は正常 */ }
 }
 
+async function loadSkills() {
+  try {
+    state.skills = await fetch('api/skills').then(r => r.json());
+  } catch (e) { /* サーバー未起動時は無視 */ }
+}
+
+function extractTempTag(text) {
+  const m = text.match(/\[temp:([\d.]+)\]/);
+  if (!m) return { temp: null, text };
+  return { temp: parseFloat(m[1]), text: text.replace(m[0], '').replace(/^\n/, '') };
+}
+
 // LLM出力を {ja, en} ペア配列に解析する。
 // "日本語: english keyword" 形式と従来のカンマ区切り形式の両方に対応。
 // "japanese: cand1 | cand2 | cand3" 形式を {ja, candidates[]} に解析。
@@ -2619,25 +2633,179 @@ function initScratchpadTabs() {
 function initLlmConvert() {
   const btn = els.llmConvertBtn;
   if (!btn) return;
+
+  // ── スキルドロップダウン ────────────────────────────────────────────────────
+  let _skillDropdown = null;
+  let _skillItems    = [];
+  let _skillFocusIdx = -1;
+
+  function ensureDropdown() {
+    if (_skillDropdown) return;
+    _skillDropdown = document.createElement('div');
+    _skillDropdown.className = 'skill-dropdown hidden';
+    document.body.appendChild(_skillDropdown);
+  }
+
+  function getSkillFilter() {
+    const lines = (els.llmJpInput?.value ?? '').split('\n');
+    if (!lines[0].trimStart().startsWith('/')) return null;
+    return lines[0].trimStart().slice(1).toLowerCase();
+  }
+
+  function positionDropdown() {
+    if (!_skillDropdown || !els.llmJpInput) return;
+    const rect = els.llmJpInput.getBoundingClientRect();
+    _skillDropdown.style.top   = `${rect.bottom + window.scrollY + 2}px`;
+    _skillDropdown.style.left  = `${rect.left   + window.scrollX}px`;
+    _skillDropdown.style.width = `${rect.width}px`;
+  }
+
+  function updateSkillFocus(idx) {
+    _skillFocusIdx = idx;
+    [...(_skillDropdown?.querySelectorAll('.skill-dropdown-item') ?? [])].forEach((el, i) => {
+      el.classList.toggle('focused', i === idx);
+    });
+  }
+
+  function hideSkillDropdown() {
+    _skillDropdown?.classList.add('hidden');
+    _skillFocusIdx = -1;
+  }
+
+  function selectSkill(skill) {
+    hideSkillDropdown();
+    if (!els.llmJpInput) return;
+    if (skill.toolCalling) {
+      els.llmJpInput.value = `/${skill.id}\n`;
+    } else {
+      const tempLine = skill.temperature != null ? `[temp:${skill.temperature}]\n` : '';
+      els.llmJpInput.value = `/\n${tempLine}${skill.content ?? ''}\n`;
+    }
+    els.llmJpInput.selectionStart = els.llmJpInput.selectionEnd = els.llmJpInput.value.length;
+    els.llmJpInput.focus();
+  }
+
+  function renderSkillDropdown(filter) {
+    ensureDropdown();
+    const matched = state.skills.filter(s =>
+      filter === '' ||
+      s.id.toLowerCase().includes(filter) ||
+      s.label.toLowerCase().includes(filter) ||
+      (s.description || '').toLowerCase().includes(filter)
+    );
+    _skillItems    = matched;
+    _skillFocusIdx = matched.length > 0 ? 0 : -1;
+    _skillDropdown.innerHTML = '';
+    if (matched.length === 0) { hideSkillDropdown(); return; }
+    matched.forEach((skill, i) => {
+      const item = document.createElement('div');
+      item.className = 'skill-dropdown-item' + (i === _skillFocusIdx ? ' focused' : '');
+      const desc = skill.description || skill.content?.slice(0, 80) || '';
+      item.innerHTML =
+        `<span class="skill-dropdown-label">${escHtml(skill.label)}</span>` +
+        `<span class="skill-dropdown-id">/${escHtml(skill.id)}</span>` +
+        (desc ? `<span class="skill-dropdown-desc">${escHtml(desc)}</span>` : '');
+      item.addEventListener('mouseenter', () => updateSkillFocus(i));
+      item.addEventListener('mousedown', e => { e.preventDefault(); selectSkill(skill); });
+      _skillDropdown.appendChild(item);
+    });
+    positionDropdown();
+    _skillDropdown.classList.remove('hidden');
+  }
+
+  els.llmJpInput?.addEventListener('input', () => {
+    const filter = getSkillFilter();
+    if (filter === null) { hideSkillDropdown(); return; }
+    renderSkillDropdown(filter);
+  });
+
+  els.llmJpInput?.addEventListener('keydown', e => {
+    if (!_skillDropdown || _skillDropdown.classList.contains('hidden')) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      updateSkillFocus(Math.min(_skillFocusIdx + 1, _skillItems.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      updateSkillFocus(Math.max(_skillFocusIdx - 1, 0));
+    } else if (e.key === 'Tab') {
+      if (_skillFocusIdx >= 0 && _skillItems[_skillFocusIdx]) {
+        e.preventDefault();
+        selectSkill(_skillItems[_skillFocusIdx]);
+      }
+      hideSkillDropdown();
+    } else if (e.key === 'Enter') {
+      if (_skillFocusIdx >= 0 && _skillItems[_skillFocusIdx]) {
+        e.preventDefault();
+        selectSkill(_skillItems[_skillFocusIdx]);
+      } else {
+        hideSkillDropdown();
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      hideSkillDropdown();
+    }
+  });
+
+  els.llmJpInput?.addEventListener('blur', () => {
+    setTimeout(hideSkillDropdown, 150);
+  });
+
+  // ── 変換ボタン ─────────────────────────────────────────────────────────────
   btn.addEventListener('click', async () => {
     const rawInput = els.llmJpInput?.value ?? '';
     const lines = rawInput.split('\n');
     const firstLine = lines[0];
+    const label = btn.querySelector('.btn-label');
+    const convertSpinner = document.getElementById('llm-convert-spinner');
     let userText, reqBody, isFreeMode;
+
     if (firstLine.trimStart().startsWith('/')) {
+      const skillId = firstLine.trimStart().slice(1).trim();
+      const skill   = state.skills.find(s => s.id === skillId);
+
+      if (skill?.toolCalling) {
+        userText = lines.slice(1).join('\n').trim();
+        if (!userText) { showToast('テキストを入力してください'); return; }
+        btn.disabled = true;
+        if (label) label.textContent = '検索中...';
+        if (convertSpinner) convertSpinner.classList.remove('hidden');
+        let _errMsg = null;
+        try {
+          const res = await fetch('api/ai-tag-select', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: userText }),
+          });
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          _llmFreeMode  = true;
+          _llmTagGroups = null;
+          if (els.llmTagOutput) els.llmTagOutput.value = data.reply ?? '';
+          renderLlmTagGroups();
+        } catch (e) {
+          _errMsg = e.message === 'モデルが設定されていません' ? 'モデルが設定されていません' : 'LLMと通信できません';
+        } finally {
+          btn.disabled = false;
+          if (label) label.textContent = _errMsg ?? '変換';
+          if (convertSpinner) convertSpinner.classList.add('hidden');
+        }
+        return;
+      }
+
       isFreeMode = true;
-      const sp = firstLine.trimStart().slice(1).trim();
-      userText = lines.slice(1).join('\n').trim();
+      const bodyText = lines.slice(1).join('\n');
+      const { temp, text: cleanedText } = extractTempTag(bodyText);
+      userText = cleanedText.trim();
       if (!userText) { showToast('テキストを入力してください'); return; }
-      reqBody = { text: userText, systemPrompt: sp };
+      reqBody = { text: userText, systemPrompt: skillId };
+      if (temp !== null) reqBody.temperature = temp;
     } else {
       isFreeMode = false;
       userText = rawInput.trim();
       if (!userText) { showToast('日本語テキストを入力してください'); return; }
       reqBody = { text: userText };
     }
-    const label = btn.querySelector('.btn-label');
-    const convertSpinner = document.getElementById('llm-convert-spinner');
+
     btn.disabled = true;
     if (label) label.textContent = '変換中...';
     if (convertSpinner) convertSpinner.classList.remove('hidden');

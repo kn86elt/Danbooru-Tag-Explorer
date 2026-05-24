@@ -2250,3 +2250,38 @@ body {
   min-height: 1.2em;
 }
 .detai
+/* ── Skill dropdown ────────────────────────────────────────────────────────── */
+.skill-dropdown {
+  position: absolute;
+  z-index: 9999;
+  background: var(--bg-panel, #2a2a2a);
+  border: 1px solid var(--border, #444);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  max-height: 240px;
+  overflow-y: auto;
+}
+.skill-dropdown.hidden { display: none; }
+.skill-dropdown-item {
+  padding: 7px 12px;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 8px;
+  align-items: baseline;
+}
+.skill-dropdown-item:hover,
+.skill-dropdown-item.focused {
+  background: var(--bg-hover, #3a3a3a);
+}
+.skill-dropdown-label { font-weight: 600; font-size: 13px; }
+.skill-dropdown-id    { font-size: 0.78em; color: var(--text-muted, #888); }
+.skill-dropdown-desc  {
+  grid-column: 1 / -1;
+  font-size: 0.75em;
+  color: var(--text-muted, #888);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}

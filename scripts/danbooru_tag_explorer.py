@@ -44,6 +44,7 @@ except Exception:
 BASE_DIR      = Path(__file__).parent.parent.resolve()
 DATA_DIR      = BASE_DIR / "data"
 SETTINGS_FILE = DATA_DIR / "settings.json"
+SKILLS_FILE   = DATA_DIR / "skills.json"
 ROUTE_PREFIX  = "/danbooru_tag_explorer"
 
 LLM_PRESETS = [
@@ -125,6 +126,90 @@ def resolve_ja_csv():
     if local.is_file():
         return local
     return None
+
+
+# ---- Skills helpers ---------------------------------------------------------
+_DEFAULT_SKILLS = [
+    {
+        "id": "tag-classify",
+        "label": "分類",
+        "description": "",
+        "content": "以下のタグを意味ごとに分類して、意味ごとに別々のコードブロックで出力して。\n単語の区切りのアンダーバー_はスペースに置換、タグとタグの間はカンマで区切って。",
+        "temperature": None,
+        "type": "system",
+    },
+    {
+        "id": "motif",
+        "label": "モチーフ",
+        "description": "",
+        "content": "女の子をモチーフにイラストのシチュエーションを考えて、その絵を再現するための要素をdanbooruタグで列挙しコードブロックで出力。解説は不要。服、物体など構成要素すべてdanbooru tagに分解して列挙する。女の子のポーズも考える（手、姿勢、表情など）。",
+        "temperature": None,
+        "type": "system",
+    },
+    {
+        "id": "fashion",
+        "label": "ファッション",
+        "description": "",
+        "content": "流行の夏向けファッションのStable Diffusion用プロンプトを数パターン考えて、利用しやすいようパターンごとに別々のcodeblockとして出力。プロンプトにはdanbooruタグ使用しカンマ区切りで列挙、単語区切りはアンダーバーではなくスペース、服装と無関係な要素（人物、背景、環境）は出力しない。曖昧な装飾語(cute、beautiful等)を使用しない。",
+        "temperature": None,
+        "type": "system",
+    },
+    {
+        "id": "danbooru",
+        "label": "Danbooruタグ選択",
+        "description": "日本語テキストからDanbooruタグを検索・選択します（ツール呼び出し）",
+        "content": None,
+        "temperature": None,
+        "type": "system",
+        "toolCalling": True,
+    },
+]
+
+
+def load_skills():
+    if SKILLS_FILE.exists():
+        try:
+            return json.loads(SKILLS_FILE.read_text(encoding="utf-8")).get("skills", [])
+        except Exception:
+            pass
+    return [dict(s) for s in _DEFAULT_SKILLS]
+
+
+def save_skills(skills):
+    DATA_DIR.mkdir(exist_ok=True)
+    SKILLS_FILE.write_text(
+        json.dumps({"skills": skills}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+# ---- Danbooru CSV index（遅延ロード）----------------------------------------
+_tag_index = None
+
+
+def _load_tag_index():
+    global _tag_index
+    if _tag_index is not None:
+        return _tag_index
+    csv_path = resolve_danbooru_csv()
+    rows = []
+    if csv_path is not None and csv_path.is_file():
+        import csv as _csv
+        with open(csv_path, encoding="utf-8", newline="") as f:
+            for row in _csv.reader(f):
+                if len(row) >= 3:
+                    name = row[0].strip()
+                    cnt  = int(row[2]) if row[2].strip().isdigit() else 0
+                    rows.append((name, cnt))
+    _tag_index = rows
+    return _tag_index
+
+
+def _search_tags(query, limit=15):
+    q = query.lower().replace(" ", "_")
+    hits = [(name, cnt) for name, cnt in _load_tag_index() if q in name.lower()]
+    hits.sort(key=lambda x: x[1], reverse=True)
+    return [{"tag": name, "post_count": cnt} for name, cnt in hits[:limit]]
 
 
 # ---- Settings helpers -------------------------------------------------------
@@ -390,6 +475,9 @@ def on_app_started(demo, app):
                 system_content = sp if sp else "You are a helpful assistant. Keep your response concise and brief, within a few lines."
                 temperature = 0.9
                 max_tokens  = 800
+                custom_temp = body.get("temperature")
+                if isinstance(custom_temp, (int, float)) and 0.0 <= custom_temp <= 2.0:
+                    temperature = float(custom_temp)
             else:
                 count = max(1, min(int(body.get("count") or 3), 10))
                 cand_ex = " | ".join(f"candidate{i+1}" for i in range(count))
@@ -421,6 +509,112 @@ def on_app_started(demo, app):
                 if free_mode:
                     return JSONResponse({"reply": content})
                 return JSONResponse({"tags": content})
+            except Exception as e:
+                return JSONResponse({"error": str(e)}, status_code=500)
+
+        @app.get(ROUTE_PREFIX + "/api/skills")
+        def dte_get_skills():
+            return JSONResponse(load_skills())
+
+        @app.post(ROUTE_PREFIX + "/api/skills")
+        async def dte_post_skills(request: Request):
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse({"error": "invalid JSON"}, status_code=400)
+            user_skills = body.get("skills")
+            if not isinstance(user_skills, list):
+                return JSONResponse({"error": "skills array required"}, status_code=400)
+            current = load_skills()
+            system_skills = [s for s in current if s.get("type") == "system"]
+            for s in user_skills:
+                if not isinstance(s.get("id"), str) or not s["id"].strip():
+                    return JSONResponse({"error": "各スキルに id が必要です"}, status_code=400)
+                if not isinstance(s.get("label"), str) or not s["label"].strip():
+                    return JSONResponse({"error": "各スキルに label が必要です"}, status_code=400)
+                s["type"] = "user"
+            save_skills(system_skills + user_skills)
+            return JSONResponse({"ok": True})
+
+        @app.post(ROUTE_PREFIX + "/api/ai-tag-select")
+        async def dte_ai_tag_select(request: Request):
+            body    = await request.json()
+            text    = (body.get("text") or "").strip()
+            if not text:
+                return JSONResponse({"error": "text is required"}, status_code=400)
+            llm     = load_settings().get("llm", {})
+            host    = (llm.get("host")    or "localhost").strip()
+            port    = int(llm.get("port") or 11434)
+            path    = (llm.get("path")    or "/v1").rstrip("/")
+            api_key = (llm.get("apiKey")  or "").strip()
+            model   = (llm.get("model")   or "").strip()
+            timeout = int(llm.get("timeout") or 60)
+            if not model:
+                return JSONResponse({"error": "モデルが設定されていません"}, status_code=400)
+            url = f"http://{host}:{port}{path}/chat/completions"
+            extra_headers = {}
+            if api_key and api_key.lower() != "none":
+                extra_headers["Authorization"] = f"Bearer {api_key}"
+            tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "search_tags",
+                        "description": "Search Danbooru tags by English keyword. Call for each concept. Returns matching tags sorted by post count.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {"type": "string", "description": "English keyword (e.g. 'cat ears', 'long hair')"}
+                            },
+                            "required": ["query"],
+                        },
+                    },
+                }
+            ]
+            system_prompt = (
+                "You are a Danbooru tag expert. Given Japanese text, identify each visual concept "
+                "and call search_tags for each one to find the best matching Danbooru tag. "
+                "After searching, output only the selected tags as a comma-separated list. No explanation."
+            )
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": text},
+            ]
+            try:
+                for _ in range(8):
+                    payload = {
+                        "model":       model,
+                        "messages":    messages,
+                        "tools":       tools,
+                        "tool_choice": "auto",
+                        "temperature": 0.1,
+                        "max_tokens":  400,
+                        "stream":      False,
+                    }
+                    result     = _http_post(url, payload, timeout=timeout, extra_headers=extra_headers)
+                    message    = result["choices"][0]["message"]
+                    tool_calls = message.get("tool_calls") or []
+                    if not tool_calls:
+                        content = (message.get("content") or "").strip()
+                        return JSONResponse({"reply": content})
+                    messages.append({
+                        "role":       "assistant",
+                        "content":    message.get("content") or "",
+                        "tool_calls": tool_calls,
+                    })
+                    for tc in tool_calls:
+                        fn   = tc.get("function", {})
+                        args = json.loads(fn.get("arguments", "{}"))
+                        hits = _search_tags(args.get("query", ""))
+                        result_text = "\n".join(
+                            f"{h['tag']} ({h['post_count']} posts)" for h in hits
+                        ) or "No results found."
+                        messages.append({
+                            "role":         "tool",
+                            "tool_call_id": tc.get("id", ""),
+                            "content":      result_text,
+                        })
+                return JSONResponse({"error": "ツール呼び出しループが上限に達しました"}, status_code=500)
             except Exception as e:
                 return JSONResponse({"error": str(e)}, status_code=500)
 

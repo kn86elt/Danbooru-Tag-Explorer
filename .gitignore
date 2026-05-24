@@ -2,6 +2,7 @@
 data/danbooru.csv
 data/ja.csv
 data/settings.json
+data/skills.json
 data/alt_data/
 
 # -- Intermediate build / test artifacts -------------------------------------
