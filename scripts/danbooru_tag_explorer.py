@@ -44,7 +44,8 @@ except Exception:
 BASE_DIR      = Path(__file__).parent.parent.resolve()
 DATA_DIR      = BASE_DIR / "data"
 SETTINGS_FILE = DATA_DIR / "settings.json"
-SKILLS_FILE   = DATA_DIR / "skills.json"
+SKILLS_FILE       = DATA_DIR / "skills.json"
+LLM_HISTORY_FILE  = DATA_DIR / "llm_history.json"
 ROUTE_PREFIX  = "/danbooru_tag_explorer"
 
 LLM_PRESETS = [
@@ -131,6 +132,15 @@ def resolve_ja_csv():
 # ---- Skills helpers ---------------------------------------------------------
 _DEFAULT_SKILLS = [
     {
+        "id": "history",
+        "label": "履歴",
+        "description": "過去に送信した指示を呼び出す",
+        "content": None,
+        "temperature": None,
+        "type": "system",
+        "specialType": "history",
+    },
+    {
         "id": "tag-classify",
         "label": "分類",
         "description": "",
@@ -179,6 +189,36 @@ def save_skills(skills):
     DATA_DIR.mkdir(exist_ok=True)
     SKILLS_FILE.write_text(
         json.dumps({"skills": skills}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def ensure_skills():
+    current = load_skills()
+    current_ids = {s.get("id") for s in current}
+    missing = [s for s in _DEFAULT_SKILLS if s["id"] not in current_ids]
+    if not SKILLS_FILE.exists() or missing:
+        user_skills  = [s for s in current if s.get("type") != "system"]
+        existing_sys = {s["id"]: s for s in current if s.get("type") == "system"}
+        merged_sys   = [existing_sys.get(d["id"], dict(d)) for d in _DEFAULT_SKILLS]
+        save_skills(merged_sys + user_skills)
+
+
+# ---- LLM 履歴 helpers -------------------------------------------------------
+
+def load_llm_history() -> list:
+    if LLM_HISTORY_FILE.exists():
+        try:
+            return json.loads(LLM_HISTORY_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return []
+
+
+def save_llm_history(history: list):
+    DATA_DIR.mkdir(exist_ok=True)
+    LLM_HISTORY_FILE.write_text(
+        json.dumps(history, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -293,6 +333,8 @@ def on_app_started(demo, app):
         return
 
     try:
+        ensure_skills()
+
         csv_path = resolve_danbooru_csv()
         if csv_path is None:
             print(
@@ -511,6 +553,26 @@ def on_app_started(demo, app):
                 return JSONResponse({"tags": content})
             except Exception as e:
                 return JSONResponse({"error": str(e)}, status_code=500)
+
+        @app.get(ROUTE_PREFIX + "/api/llm-history")
+        def dte_get_llm_history():
+            return JSONResponse(load_llm_history())
+
+        @app.post(ROUTE_PREFIX + "/api/llm-history")
+        async def dte_post_llm_history(request: Request):
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse({"error": "invalid JSON"}, status_code=400)
+            content = (body.get("content") or "").strip()
+            if not content:
+                return JSONResponse({"error": "content required"}, status_code=400)
+            history = load_llm_history()
+            history = [h for h in history if h != content]
+            history.insert(0, content)
+            history = history[:10]
+            save_llm_history(history)
+            return JSONResponse({"ok": True})
 
         @app.get(ROUTE_PREFIX + "/api/skills")
         def dte_get_skills():

@@ -2287,3 +2287,12 @@ body {
   text-overflow: ellipsis;
   margin-top: 1px;
 }
+.skill-dropdown-empty {
+  padding: 10px 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.skill-dropdown-history-preview {
+  font-size: 13px;
+  grid-column: 1 / -1;
+}

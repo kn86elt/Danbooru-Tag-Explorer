@@ -132,6 +132,7 @@ const state = {
     path: '/v1', apiKey: '', model: '', timeout: 30,
   },
   skills: [],
+  llmHistory: [],
 };
 
 // ── Persistence helpers ─────────────────────────────────────────────────────
@@ -448,6 +449,7 @@ async function boot() {
     if (_mode === 'a1111') initA1111Mode();
     tryAutoDetectLlm(); // non-blocking: サイレントでモデル自動検出
     loadSkills();       // non-blocking: スキル定義を取得
+    loadLlmHistory();   // non-blocking: LLM履歴を取得
 
     state.observer = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting) {
@@ -1739,6 +1741,28 @@ async function loadSkills() {
   } catch (e) { /* サーバー未起動時は無視 */ }
 }
 
+async function loadLlmHistory() {
+  try {
+    const data = await fetch('api/llm-history').then(r => r.json());
+    state.llmHistory = Array.isArray(data) ? data : [];
+  } catch (e) {}
+}
+
+async function addToLlmHistory(content) {
+  const trimmed = content.trim();
+  if (!trimmed) return;
+  try {
+    await fetch('api/llm-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: trimmed }),
+    });
+    state.llmHistory = state.llmHistory.filter(h => h !== trimmed);
+    state.llmHistory.unshift(trimmed);
+    state.llmHistory = state.llmHistory.slice(0, 10);
+  } catch (e) {}
+}
+
 function extractTempTag(text) {
   const m = text.match(/\[temp:([\d.]+)\]/);
   if (!m) return { temp: null, text };
@@ -2640,6 +2664,7 @@ function initLlmConvert() {
   let _skillDropdown = null;
   let _skillItems    = [];
   let _skillFocusIdx = -1;
+  let _historyMode   = false;
 
   function ensureDropdown() {
     if (_skillDropdown) return;
@@ -2675,9 +2700,53 @@ function initLlmConvert() {
   function hideSkillDropdown() {
     _skillDropdown?.classList.add('hidden');
     _skillFocusIdx = -1;
+    _historyMode   = false;
+  }
+
+  function showHistoryDropdown() {
+    ensureDropdown();
+    _historyMode   = true;
+    _skillFocusIdx = -1;
+    _skillItems    = [...state.llmHistory];
+    _skillDropdown.innerHTML = '';
+    if (_skillItems.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'skill-dropdown-empty';
+      empty.textContent = '履歴がありません';
+      _skillDropdown.appendChild(empty);
+      positionDropdown();
+      _skillDropdown.classList.remove('hidden');
+      return;
+    }
+    _skillItems.forEach((content, i) => {
+      const item = document.createElement('div');
+      item.className = 'skill-dropdown-item';
+      const preview = content.split('\n')
+        .filter(l => l.trim() && !l.trimStart().startsWith('/'))
+        .slice(0, 1)[0] || content.split('\n')[0];
+      const short = preview.length > 90 ? preview.slice(0, 90) + '…' : preview;
+      item.innerHTML = `<span class="skill-dropdown-history-preview">${escHtml(short)}</span>`;
+      item.addEventListener('mouseenter', () => updateSkillFocus(i));
+      item.addEventListener('mousedown', e => { e.preventDefault(); restoreHistory(content); });
+      _skillDropdown.appendChild(item);
+    });
+    positionDropdown();
+    _skillDropdown.classList.remove('hidden');
+  }
+
+  function restoreHistory(content) {
+    hideSkillDropdown();
+    if (!els.llmJpInput) return;
+    els.llmJpInput.value = content;
+    els.llmJpInput.selectionStart = els.llmJpInput.selectionEnd = content.length;
+    els.llmJpInput.focus();
   }
 
   function selectSkill(skill) {
+    if (skill.specialType === 'history') {
+      showHistoryDropdown();
+      return;
+    }
     hideSkillDropdown();
     if (!els.llmJpInput) return;
     if (skill.toolCalling) {
@@ -2735,13 +2804,21 @@ function initLlmConvert() {
     } else if (e.key === 'Tab') {
       if (_skillFocusIdx >= 0 && _skillItems[_skillFocusIdx]) {
         e.preventDefault();
-        selectSkill(_skillItems[_skillFocusIdx]);
+        if (_historyMode) {
+          restoreHistory(_skillItems[_skillFocusIdx]);
+        } else {
+          selectSkill(_skillItems[_skillFocusIdx]);
+        }
       }
       hideSkillDropdown();
     } else if (e.key === 'Enter') {
       if (_skillFocusIdx >= 0 && _skillItems[_skillFocusIdx]) {
         e.preventDefault();
-        selectSkill(_skillItems[_skillFocusIdx]);
+        if (_historyMode) {
+          restoreHistory(_skillItems[_skillFocusIdx]);
+        } else {
+          selectSkill(_skillItems[_skillFocusIdx]);
+        }
       } else {
         hideSkillDropdown();
       }
@@ -2766,6 +2843,7 @@ function initLlmConvert() {
 
     if (firstLine.trimStart().startsWith('/')) {
       const skillId = firstLine.trimStart().slice(1).trim();
+      if (skillId !== 'history') addToLlmHistory(rawInput);
       const skill   = state.skills.find(s => s.id === skillId);
 
       if (skill?.toolCalling) {
