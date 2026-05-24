@@ -89,7 +89,7 @@ _DEFAULTS: dict = {
         "path":    "/v1",
         "apiKey":  "",
         "model":   "",
-        "timeout": 30,
+        "timeout": 120,
     },
     "_notes": {
         "tagCsv": "タグメタデータCSV (デフォルト: data/danbooru.csv)",

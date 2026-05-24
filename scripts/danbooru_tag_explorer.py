@@ -225,7 +225,7 @@ _DEFAULTS = {
         "path":    "/v1",
         "apiKey":  "",
         "model":   "",
-        "timeout": 30,
+        "timeout": 120,
     },
     "_notes": {
         "tagCsv": "Tag metadata CSV (default: data/danbooru.csv) -- A1111モードでは無視される",
