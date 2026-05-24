@@ -373,6 +373,7 @@ const els = {
   llmPort:              $('llm-port'),
   llmPath:              $('llm-path'),
   llmApiKey:            $('llm-apikey'),
+  llmTimeout:           $('llm-timeout'),
   llmModelSelect:       $('llm-model-select'),
   llmFetchModelsBtn:    $('llm-fetch-models-btn'),
   llmModelNote:         $('llm-model-note'),
@@ -2504,7 +2505,8 @@ function initSettingsModal() {
     if (els.llmHost)         els.llmHost.value         = c.host   || 'localhost';
     if (els.llmPort)         els.llmPort.value         = c.port   || 11434;
     if (els.llmPath)         els.llmPath.value         = c.path   || '/v1';
-    if (els.llmApiKey)       els.llmApiKey.value       = c.apiKey || '';
+    if (els.llmApiKey)       els.llmApiKey.value       = c.apiKey   || '';
+    if (els.llmTimeout)      els.llmTimeout.value      = c.timeout  || 120;
     if (els.llmModelSelect)  populateModelSelect([...(c.model ? [c.model] : [])], c.model || '');
     updateUnloadVisibility();
     // CSV フィールド
@@ -2584,7 +2586,7 @@ function initSettingsModal() {
       path:    els.llmPath?.value.trim()  || '/v1',
       apiKey:  els.llmApiKey?.value.trim() || '',
       model:   els.llmModelSelect?.value || '',
-      timeout: state.llmConfig.timeout || 30,
+      timeout: parseInt(els.llmTimeout?.value) || 120,
     };
     const body = { llm };
     if (_mode !== 'a1111') {

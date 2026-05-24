@@ -110,6 +110,10 @@
             <input id="llm-apikey" class="settings-input" placeholder="不要な場合は空欄" spellcheck="false">
           </div>
           <div class="settings-field">
+            <label class="settings-label" for="llm-timeout">タイムアウト（秒）</label>
+            <input id="llm-timeout" class="settings-input settings-port" type="number" min="10" max="600" placeholder="120">
+          </div>
+          <div class="settings-field">
             <label class="settings-label" for="llm-model-select">モデル</label>
             <div class="settings-row">
               <select id="llm-model-select" class="settings-select settings-model-select"></select>
