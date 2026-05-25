@@ -1026,7 +1026,8 @@ function navigateTo(path) {
       navigateTo(path);
     };
 
-    renderTagGrid(getSearchQueryTags(query), [], path);
+    const { tags: _sqTags, hiddenCount: _sqHidden } = getSearchQueryTags(query);
+    renderTagGrid(_sqTags, [], path, _sqHidden);
     return;
   }
 
@@ -1230,7 +1231,7 @@ function saveFilterState() {
   localStorage.setItem('tagFilter', JSON.stringify(vals));
 }
 
-function renderTagGrid(tags, subcats, path) {
+function renderTagGrid(tags, subcats, path, searchHiddenCount = 0) {
   const minCount  = state.minPostCount;
   const sort      = els.sortSelect.value;
 
@@ -1268,7 +1269,9 @@ function renderTagGrid(tags, subcats, path) {
     }
   }
 
-  els.tagCount.textContent = `${allTags.length} tags`;
+  els.tagCount.textContent = searchHiddenCount > 0
+    ? `${allTags.length} tags (最小POST以下の ${searchHiddenCount}件が非表示)`
+    : `${allTags.length} tags`;
   state.renderOffset = 0;
   state._currentTags = allTags;
 
@@ -1585,17 +1588,17 @@ function formatCount(n) {
 function getSearchQueryTags(query) {
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
   const minCount = state.minPostCount;
-  const results = [];
+  const tags = [];
+  let hiddenCount = 0;
   for (const [tagName, meta] of state.tagMeta.entries()) {
-    if (minCount > 0 && meta.count < minCount) continue;
     const jaText = state.translations.get(tagName) || '';
     const nameL = tagName.toLowerCase();
     const jaL   = jaText.toLowerCase();
-    if (tokens.every(t => nameL.includes(t) || jaL.includes(t))) {
-      results.push({ name: tagName, url: state.tagNodes.get(tagName)?.url || '' });
-    }
+    if (!tokens.every(t => nameL.includes(t) || jaL.includes(t))) continue;
+    if (minCount > 0 && meta.count < minCount) { hiddenCount++; continue; }
+    tags.push({ name: tagName, url: state.tagNodes.get(tagName)?.url || '' });
   }
-  return results;
+  return { tags, hiddenCount };
 }
 
 function getRelatedTags(tagName) {
