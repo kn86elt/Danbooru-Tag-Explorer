@@ -340,6 +340,11 @@ body {
   border-color: var(--accent);
   color: var(--accent);
 }
+.search-hidden-count {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-left: 4px;
+}
 .search-ai-badge {
   display: inline-block;
   background: var(--accent);

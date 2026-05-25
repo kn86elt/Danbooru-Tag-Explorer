@@ -290,6 +290,7 @@ const els = {
   searchOverlay:   $('search-results-overlay'),
   searchList:      $('search-results-list'),
   searchCount:     $('search-results-count'),
+  searchHiddenCount:   $('search-hidden-count'),
   searchAiBadge:      $('search-ai-badge'),
   searchAiCandidates: $('search-ai-candidates'),
   searchEnterHint:    $('search-enter-hint'),
@@ -1632,24 +1633,30 @@ function handleSearch(query, isAI = false) {
   const minCount = state.minPostCount;
 
   const results = [];
+  let hiddenCount = 0;
   for (const [tagName, meta] of state.tagMeta.entries()) {
-    if (minCount > 0 && meta.count < minCount) continue;
     const jaText = state.translations.get(tagName) || '';
     const nameL = tagName.toLowerCase();
     const jaL   = jaText.toLowerCase();
-    if (tokens.every(t => nameL.includes(t) || jaL.includes(t))) {
-      results.push(tagName);
-      if (results.length >= 60) break;
-    }
+    if (!tokens.every(t => nameL.includes(t) || jaL.includes(t))) continue;
+    if (minCount > 0 && meta.count < minCount) { hiddenCount++; continue; }
+    results.push(tagName);
   }
 
   results.sort((a, b) => getCount(b) - getCount(a));
+  const displayResults = results.slice(0, 60);
 
   els.searchCount.textContent = results.length;
+  if (minCount > 0 && hiddenCount > 0) {
+    els.searchHiddenCount.textContent = `(最小POST以下の ${hiddenCount}件が非表示)`;
+    els.searchHiddenCount.classList.remove('hidden');
+  } else {
+    els.searchHiddenCount.classList.add('hidden');
+  }
   els.searchList.innerHTML = '';
   const frag = document.createDocumentFragment();
 
-  results.forEach(tagName => {
+  displayResults.forEach(tagName => {
     const meta = state.tagMeta.get(tagName);
     const nodeInfo = state.tagNodes.get(tagName);
     const breadcrumb = nodeInfo ? nodeInfo.breadcrumb : [];
