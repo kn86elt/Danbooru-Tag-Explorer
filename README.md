@@ -185,6 +185,10 @@ AI候補数設定、検索履歴、カテゴリ閲覧履歴、スクラッチパ
 
 [CHANGELOG.md](CHANGELOG.md) を参照してください。
 
-## ライセンス
+## 開発について
+本プロジェクトには各種生成AIによる成果物が含まれています。
 
-MIT
+## License
+Code in this repository is licensed under MIT.
+
+Generated tag tree data is derived from public Danbooru wiki/tag metadata and the historical seed structure from KohakuBlueleaf/danbooru-tag-tree. No ownership of Danbooru-originated metadata is claimed. Please follow Danbooru's terms and the upstream sources' terms when using the generated data.
