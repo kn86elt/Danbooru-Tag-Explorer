@@ -353,6 +353,7 @@ def api_ai_translate():
     if free_mode:
         sp = (body.get("systemPrompt") or "").strip()
         system_content = sp if sp else "You are a helpful assistant. Keep your response concise and brief, within a few lines."
+        system_content += "\nタグやプロンプトを列挙する場合は、コードブロック形式で出力してください。"
         temperature = 0.9
         max_tokens  = 800
         custom_temp = body.get("temperature")

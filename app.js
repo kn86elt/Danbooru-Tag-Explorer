@@ -1802,6 +1802,11 @@ function parseLlmOutput(raw) {
     .map(en => ({ ja: '', candidates: [en] }));
 }
 
+function extractTagsFromText(text) {
+  const blocks = [...text.matchAll(/```[^\n]*\n([\s\S]*?)```/g)];
+  return blocks.length > 0 ? blocks.map(m => m[1]).join('\n') : text;
+}
+
 // state.translations (tagName→ja) の逆引きMap (ja→[tagName,...]) をキャッシュ構築。
 let _jaReverseMap = null;
 function getJaReverseMap() {
@@ -2362,6 +2367,16 @@ function renderLlmTagGroups() {
   list.innerHTML = '';
 
   if (_llmFreeMode) {
+    const raw = extractTagsFromText(els.llmTagOutput?.value ?? '');
+    const items = raw.split(/[\n,]/).map(t => t.trim()).filter(Boolean)
+      .map(token => {
+        const normalized = token.replace(/\\\(/g, '(').replace(/\\\)/g, ')').replace(/ /g, '_');
+        const known = state.tagMeta.has(normalized);
+        return { token, rawName: known ? normalized : token, known };
+      });
+    for (const { token, rawName, known } of items) {
+      list.appendChild(createLlmTagListItem(token, rawName, known));
+    }
     return;
   }
 
