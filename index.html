@@ -149,6 +149,23 @@
           </div>
         </section>
 
+        <!-- システムプロンプト設定 -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">システムプロンプト</h3>
+          <div class="settings-field">
+            <label class="settings-label">標準プロンプト（参照）</label>
+            <textarea id="sys-prompt-default-view" class="settings-textarea" readonly rows="3" tabindex="-1"></textarea>
+          </div>
+          <div class="settings-field">
+            <label class="settings-label">ユーザースロット</label>
+            <label class="sys-prompt-use-default">
+              <input type="radio" name="active-sys-prompt" value="" id="sys-prompt-use-default"> 標準を使用
+            </label>
+            <div id="sys-prompt-slots-list" class="sys-prompt-slots-list"></div>
+            <button id="sys-prompt-add-btn" class="settings-secondary-btn sys-prompt-add-btn">＋ スロット追加</button>
+          </div>
+        </section>
+
       </div>
       <div class="settings-footer">
         <button id="settings-save-btn" class="settings-primary-btn">保存</button>
