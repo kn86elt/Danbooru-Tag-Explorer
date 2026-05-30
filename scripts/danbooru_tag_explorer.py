@@ -48,6 +48,11 @@ SKILLS_FILE       = DATA_DIR / "skills.json"
 LLM_HISTORY_FILE  = DATA_DIR / "llm_history.json"
 ROUTE_PREFIX  = "/danbooru_tag_explorer"
 
+SYSTEM_PROMPT_FREE_DEFAULT = (
+    "You are a helpful assistant. Keep your response concise and brief, within a few lines."
+    "\nタグやプロンプトを列挙する場合は、コードブロック形式で出力してください。"
+)
+
 LLM_PRESETS = [
     {"id": "ollama",         "label": "Ollama",                "port": 11434, "path": "/v1", "key": "",          "supportsUnload": True},
     {"id": "lm-studio",      "label": "LM Studio",             "port": 1234,  "path": "/v1", "key": "lm-studio", "supportsUnload": True},
@@ -131,6 +136,15 @@ def resolve_ja_csv():
 
 # ---- Skills helpers ---------------------------------------------------------
 _DEFAULT_SKILLS = [
+    {
+        "id": "settings",
+        "label": "設定",
+        "description": "設定モーダルを開く",
+        "content": None,
+        "temperature": None,
+        "type": "system",
+        "specialType": "settings",
+    },
     {
         "id": "history",
         "label": "履歴",
@@ -271,6 +285,8 @@ _DEFAULTS = {
         "tagCsv": "Tag metadata CSV (default: data/danbooru.csv) -- A1111モードでは無視される",
         "jaCsv":  "Japanese translation CSV (default: data/ja.csv) -- A1111モードでは無視される",
     },
+    "systemPromptSlots":    [],
+    "activeSystemPromptSlot": None,
 }
 
 
@@ -282,6 +298,7 @@ def load_settings():
             result.update({k: v for k, v in saved.items() if k != "_notes"})
         except Exception:
             pass
+    result["_systemPromptDefault"] = SYSTEM_PROMPT_FREE_DEFAULT
     return result
 
 
@@ -446,6 +463,10 @@ def on_app_started(demo, app):
                     if k in body["llm"]:
                         llm[k] = body["llm"][k]
             # A1111モードでは tagCsv/jaCsv は A1111 Settings が管理するため保存しない
+            if isinstance(body.get("systemPromptSlots"), list):
+                s["systemPromptSlots"] = body["systemPromptSlots"]
+            if "activeSystemPromptSlot" in body:
+                s["activeSystemPromptSlot"] = body["activeSystemPromptSlot"] or None
             save_settings(s)
             return JSONResponse({"ok": True})
 
@@ -514,8 +535,16 @@ def on_app_started(demo, app):
                 extra_headers["Authorization"] = f"Bearer {api_key}"
             if free_mode:
                 sp = (body.get("systemPrompt") or "").strip()
-                system_content = sp if sp else "You are a helpful assistant. Keep your response concise and brief, within a few lines."
-                system_content += "\nタグやプロンプトを列挙する場合は、コードブロック形式で出力してください。"
+                if sp:
+                    system_content = sp + "\nタグやプロンプトを列挙する場合は、コードブロック形式で出力してください。"
+                else:
+                    cfg = load_settings()
+                    active_id = cfg.get("activeSystemPromptSlot")
+                    if active_id:
+                        slot = next((x for x in cfg.get("systemPromptSlots", []) if x.get("id") == active_id), None)
+                        system_content = slot["content"] if slot and slot.get("content") else SYSTEM_PROMPT_FREE_DEFAULT
+                    else:
+                        system_content = SYSTEM_PROMPT_FREE_DEFAULT
                 temperature = 0.9
                 max_tokens  = 800
                 custom_temp = body.get("temperature")

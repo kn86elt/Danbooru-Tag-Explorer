@@ -2117,53 +2117,75 @@ body {
   resize: vertical;
   font-family: inherit;
   line-height: 1.5;
-  margin-top: 4px;
   display: block;
 }
 .settings-textarea:focus { outline: none; border-color: var(--accent); }
-.settings-textarea[readonly] { opacity: 0.6; cursor: default; resize: none; }
-.sys-prompt-use-default {
+.settings-textarea[readonly] { opacity: 0.6; cursor: default; }
+.sys-prompt-panel {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-bottom: 8px;
-  cursor: pointer;
+  gap: 8px;
+  align-items: flex-start;
 }
-.sys-prompt-slots-list { display: flex; flex-direction: column; gap: 8px; }
-.sys-prompt-slot {
+.sys-prompt-listbox {
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 10px;
+  border-radius: 4px;
+  overflow-y: auto;
+  height: 160px;
+  min-width: 110px;
+  max-width: 150px;
+  flex-shrink: 0;
   background: var(--surface2);
+  display: flex;
+  flex-direction: column;
 }
-.sys-prompt-slot-header {
+.sys-prompt-list-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
-}
-.sys-prompt-slot-active {
-  display: flex;
-  align-items: center;
-  gap: 4px;
   font-size: 12px;
-  color: var(--text-dim);
+  padding: 5px 8px;
   cursor: pointer;
-  flex-shrink: 0;
-  white-space: nowrap;
+  color: var(--text);
+  min-height: 28px;
+  box-sizing: border-box;
 }
-.sys-prompt-slot-active input[type="radio"] { cursor: pointer; }
-.sys-prompt-slot-name { flex: 1; min-width: 0; }
-.sys-prompt-slot-del {
-  flex-shrink: 0;
-  padding: 2px 6px;
-  font-size: 11px;
-  opacity: 0.7;
+.sys-prompt-list-item:hover:not(.sys-prompt-list-item--active) {
+  background: var(--surface3);
 }
-.sys-prompt-slot-del:hover { opacity: 1; color: var(--danger); }
-.sys-prompt-add-btn { margin-top: 6px; }
+.sys-prompt-list-item--active {
+  background: var(--text);
+  color: var(--surface2);
+}
+.sys-prompt-slot-name-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  min-width: 0;
+  padding: 0;
+  font-family: inherit;
+}
+.sys-prompt-slot-name-input:focus { outline: none; cursor: text; }
+.sys-prompt-editor {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sys-prompt-content-area { height: 160px; resize: vertical; }
+.sys-prompt-add-row {
+  font-size: 12px;
+  padding: 5px 8px;
+  cursor: pointer;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  margin-top: auto;
+  flex-shrink: 0;
+}
+.sys-prompt-add-row:hover { color: var(--text); background: var(--surface3); }
+.sys-prompt-del-btn { align-self: flex-start; }
 
 /* ── Tag detail modal ────────────────────────── */
 .tag-detail-overlay {

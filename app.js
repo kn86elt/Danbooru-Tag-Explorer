@@ -400,9 +400,9 @@ const els = {
   csvJaPath:            $('csv-ja-path'),
   settingsCsvFields:    $('settings-csv-fields'),
   settingsCsvA1111Note: $('settings-csv-a1111-note'),
-  sysPromptDefaultView: $('sys-prompt-default-view'),
   sysPromptSlotsList:   $('sys-prompt-slots-list'),
-  sysPromptAddBtn:      $('sys-prompt-add-btn'),
+  sysPromptContentArea: $('sys-prompt-content-area'),
+  sysPromptDelBtn:      $('sys-prompt-slot-del'),
   dteDialog:           $('dte-dialog'),
   dteDialogMessage:    $('dte-dialog-message'),
   dteDialogButtons:    $('dte-dialog-buttons'),
@@ -2563,37 +2563,46 @@ function initSettingsModal() {
     sel.value = selectedValue;
   }
 
-  function renderSysPromptSlots(slots, activeId) {
+  let _slots = [];
+  let _activeSlotId = '';
+
+  function renderSysPromptList() {
     const container = els.sysPromptSlotsList;
     if (!container) return;
     container.innerHTML = '';
-    const useDefault = document.getElementById('sys-prompt-use-default');
-    if (useDefault) useDefault.checked = !activeId;
-    (slots || []).forEach(slot => {
-      const div = document.createElement('div');
-      div.className = 'sys-prompt-slot';
-      div.dataset.slotId = slot.id;
-      div.innerHTML =
-        `<div class="sys-prompt-slot-header">` +
-          `<label class="sys-prompt-slot-active">` +
-            `<input type="radio" name="active-sys-prompt" value="${escHtml(slot.id)}"` +
-            (slot.id === activeId ? ' checked' : '') + `> アクティブ` +
-          `</label>` +
-          `<input type="text" class="settings-input sys-prompt-slot-name" value="${escHtml(slot.label || '')}" placeholder="スロット名">` +
-          `<button class="btn-icon sys-prompt-slot-del" title="削除">✕</button>` +
-        `</div>` +
-        `<textarea class="settings-textarea sys-prompt-slot-content" rows="4" placeholder="システムプロンプトを入力...">${escHtml(slot.content || '')}</textarea>`;
-      container.appendChild(div);
+    document.getElementById('sys-prompt-default-item')
+      ?.classList.toggle('sys-prompt-list-item--active', _activeSlotId === '');
+    _slots.forEach(slot => {
+      const item = document.createElement('div');
+      item.className = 'sys-prompt-list-item' + (slot.id === _activeSlotId ? ' sys-prompt-list-item--active' : '');
+      item.dataset.slotId = slot.id;
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'sys-prompt-slot-name-input';
+      nameInput.value = slot.label || '';
+      nameInput.placeholder = 'スロット名';
+      item.appendChild(nameInput);
+      container.appendChild(item);
     });
   }
 
+  function updateSysPromptContent() {
+    const area = els.sysPromptContentArea;
+    if (!area) return;
+    if (_activeSlotId === '') {
+      area.value    = state.systemPromptDefault || '';
+      area.readOnly = true;
+      els.sysPromptDelBtn?.classList.add('hidden');
+    } else {
+      const slot    = _slots.find(s => s.id === _activeSlotId);
+      area.value    = slot?.content || '';
+      area.readOnly = false;
+      els.sysPromptDelBtn?.classList.remove('hidden');
+    }
+  }
+
   function collectSlotsFromUI() {
-    if (!els.sysPromptSlotsList) return [];
-    return [...els.sysPromptSlotsList.querySelectorAll('.sys-prompt-slot')].map(div => ({
-      id:      div.dataset.slotId,
-      label:   div.querySelector('.sys-prompt-slot-name')?.value.trim() || '',
-      content: div.querySelector('.sys-prompt-slot-content')?.value || '',
-    }));
+    return _slots.map(s => ({ ...s }));
   }
 
   function openSettings() {
@@ -2617,10 +2626,10 @@ function initSettingsModal() {
       }).catch(() => {});
     }
     // システムプロンプトスロット UI
-    if (els.sysPromptDefaultView) {
-      els.sysPromptDefaultView.value = state.systemPromptDefault || '';
-    }
-    renderSysPromptSlots(state.systemPromptSlots, state.activeSystemPromptSlot);
+    _slots       = (state.systemPromptSlots || []).map(s => ({ ...s }));
+    _activeSlotId = state.activeSystemPromptSlot || '';
+    renderSysPromptList();
+    updateSysPromptContent();
     clearNotes();
     els.settingsOverlay?.classList.remove('hidden');
   }
@@ -2679,28 +2688,53 @@ function initSettingsModal() {
     }
   });
 
-  // スロット追加
-  els.sysPromptAddBtn?.addEventListener('click', () => {
-    const slots  = collectSlotsFromUI();
-    const newId  = 'slot-' + Date.now();
-    slots.push({ id: newId, label: 'スロット ' + (slots.length + 1), content: '' });
-    const active = document.querySelector('input[name="active-sys-prompt"]:checked')?.value || '';
-    renderSysPromptSlots(slots, active);
+  // スロット選択 / ＋新規（クリック・イベント委譲）
+  document.getElementById('sys-prompt-list-wrap')?.addEventListener('click', e => {
+    // ＋新規行
+    if (e.target.closest('#sys-prompt-add-row')) {
+      const newId = 'slot-' + Date.now();
+      _slots.push({ id: newId, label: 'スロット ' + (_slots.length + 1), content: '' });
+      _activeSlotId = newId;
+      renderSysPromptList();
+      updateSysPromptContent();
+      // 新スロットをスクロールして見えるようにする
+      els.sysPromptSlotsList?.lastElementChild?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    // スロット選択
+    const item = e.target.closest('.sys-prompt-list-item');
+    if (!item) return;
+    const slotId = item.dataset.slotId ?? '';
+    if (slotId === _activeSlotId) return; // 既に選択中はスキップ
+    _activeSlotId = slotId;
+    document.querySelectorAll('#sys-prompt-list-wrap .sys-prompt-list-item').forEach(el => {
+      el.classList.toggle('sys-prompt-list-item--active', el.dataset.slotId === _activeSlotId);
+    });
+    updateSysPromptContent();
   });
 
-  // スロット削除（イベント委譲）
-  els.sysPromptSlotsList?.addEventListener('click', e => {
-    const delBtn = e.target.closest('.sys-prompt-slot-del');
-    if (!delBtn) return;
-    const slot = delBtn.closest('.sys-prompt-slot');
-    if (!slot) return;
-    const wasActive = slot.dataset.slotId ===
-      (document.querySelector('input[name="active-sys-prompt"]:checked')?.value || '');
-    slot.remove();
-    if (wasActive) {
-      const useDefault = document.getElementById('sys-prompt-use-default');
-      if (useDefault) useDefault.checked = true;
-    }
+  // スロット名変更（イベント委譲）
+  els.sysPromptSlotsList?.addEventListener('input', e => {
+    if (!e.target.classList.contains('sys-prompt-slot-name-input')) return;
+    const item   = e.target.closest('.sys-prompt-list-item');
+    const slotId = item?.dataset.slotId;
+    const slot   = slotId && _slots.find(s => s.id === slotId);
+    if (slot) slot.label = e.target.value;
+  });
+
+  // コンテンツ編集
+  els.sysPromptContentArea?.addEventListener('input', () => {
+    if (_activeSlotId === '') return;
+    const slot = _slots.find(s => s.id === _activeSlotId);
+    if (slot) slot.content = els.sysPromptContentArea.value;
+  });
+
+  // スロット削除
+  els.sysPromptDelBtn?.addEventListener('click', () => {
+    _slots = _slots.filter(s => s.id !== _activeSlotId);
+    _activeSlotId = '';
+    renderSysPromptList();
+    updateSysPromptContent();
   });
 
   // 保存
@@ -2720,7 +2754,7 @@ function initSettingsModal() {
       body.jaCsv  = els.csvJaPath?.value.trim()  || '';
     }
     body.systemPromptSlots      = collectSlotsFromUI();
-    body.activeSystemPromptSlot = document.querySelector('input[name="active-sys-prompt"]:checked')?.value || null;
+    body.activeSystemPromptSlot = _activeSlotId || null;
     try {
       const data = await fetch('api/settings', {
         method: 'POST',
@@ -2729,8 +2763,8 @@ function initSettingsModal() {
       }).then(r => r.json());
       if (!data.ok) throw new Error('save failed');
       Object.assign(state.llmConfig, llm);
-      state.systemPromptSlots      = body.systemPromptSlots;
-      state.activeSystemPromptSlot = body.activeSystemPromptSlot;
+      state.systemPromptSlots      = _slots.map(s => ({ ...s }));
+      state.activeSystemPromptSlot = _activeSlotId || null;
       closeSettings();
       showToast('⚙ 設定を保存しました');
     } catch (e) {
