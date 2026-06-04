@@ -26,6 +26,7 @@ import json
 import random
 import re
 import traceback
+import urllib.parse
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -35,7 +36,7 @@ from pathlib import Path
 # Wrapped in try/except so the module can be imported outside A1111 without crashing.
 try:
     from fastapi import Request
-    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
     _FASTAPI_OK = True
 except Exception:
     _FASTAPI_OK = False
@@ -66,6 +67,48 @@ def _http_get(url, timeout=5):
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+def _post_thumbnail_url(post: dict) -> str:
+    variants = ((post.get("media_asset") or {}).get("variants") or [])
+    variant_url = ""
+    if isinstance(variants, list):
+        for kind in ("180x180", "360x360"):
+            found = next((v.get("url") for v in variants if isinstance(v, dict) and v.get("type") == kind and v.get("url")), "")
+            if found:
+                variant_url = found
+                break
+    return post.get("preview_file_url") or variant_url or post.get("large_file_url") or post.get("file_url") or ""
+
+def _danbooru_thumbnail_urls(tag_name: str, count: int = 1) -> list[str]:
+    limit = max(1, min(4, int(count or 1)))
+    params = urllib.parse.urlencode({"tags": tag_name + " rating:g", "limit": str(limit)})
+    req = urllib.request.Request(
+        f"https://danbooru.donmai.us/posts.json?{params}",
+        headers={"Accept": "application/json", "User-Agent": "DanbooruTagExplorer/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        posts = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(posts, list):
+        return []
+    return [url for url in (_post_thumbnail_url(post) for post in posts if isinstance(post, dict)) if url]
+
+def _is_allowed_danbooru_image_url(url: str) -> bool:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https":
+        return False
+    return parsed.hostname in {"cdn.donmai.us", "danbooru.donmai.us"}
+
+def _fetch_danbooru_image(url: str):
+    if not _is_allowed_danbooru_image_url(url):
+        raise ValueError("unsupported image host")
+    req = urllib.request.Request(
+        url,
+        headers={"Accept": "image/*", "User-Agent": "DanbooruTagExplorer/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        content_type = resp.headers.get("Content-Type") or "application/octet-stream"
+        data = resp.read(2 * 1024 * 1024)
+    return data, content_type
 
 def _http_post(url, body=None, timeout=10, extra_headers=None):
     data = json.dumps(body or {}).encode("utf-8")
@@ -281,6 +324,10 @@ _DEFAULTS = {
         "model":   "",
         "timeout": 120,
     },
+    "wikiPreview": {
+        "maxImages": 1,
+        "thumbSize": "m",
+    },
     "_notes": {
         "tagCsv": "Tag metadata CSV (default: data/danbooru.csv) -- A1111モードでは無視される",
         "jaCsv":  "Japanese translation CSV (default: data/ja.csv) -- A1111モードでは無視される",
@@ -416,6 +463,37 @@ def on_app_started(demo, app):
                 return JSONResponse({"error": "ja.csv not found"}, status_code=404)
             return FileResponse(str(path), media_type="text/plain; charset=utf-8")
 
+        @app.get(ROUTE_PREFIX + "/api/danbooru-thumbnail")
+        def dte_danbooru_thumbnail(tag: str = "", count: int = 1):
+            tag = (tag or "").strip()
+            try:
+                count = max(0, min(4, int(count or 1)))
+            except Exception:
+                count = 1
+            if not tag:
+                return JSONResponse({"thumbnailUrl": "", "thumbnailUrls": []})
+            if count <= 0:
+                return JSONResponse({"thumbnailUrl": "", "thumbnailUrls": []})
+            try:
+                urls = _danbooru_thumbnail_urls(tag, count)
+                proxied_urls = ["api/danbooru-image?" + urllib.parse.urlencode({"url": url}) for url in urls]
+                first = proxied_urls[0] if proxied_urls else ""
+                return JSONResponse({"thumbnailUrl": first, "thumbnailUrls": proxied_urls})
+            except Exception as e:
+                return JSONResponse({"thumbnailUrl": "", "thumbnailUrls": [], "error": str(e)})
+
+        @app.get(ROUTE_PREFIX + "/api/danbooru-image")
+        def dte_danbooru_image(url: str = ""):
+            try:
+                data, content_type = _fetch_danbooru_image((url or "").strip())
+                return Response(
+                    content=data,
+                    media_type=content_type,
+                    headers={"Cache-Control": "public, max-age=86400"},
+                )
+            except Exception:
+                return JSONResponse({"error": "not found"}, status_code=404)
+
         @app.get(ROUTE_PREFIX + "/api/favorites")
         def dte_get_favorites():
             return JSONResponse(load_settings().get("favTags", []))
@@ -467,6 +545,14 @@ def on_app_started(demo, app):
                 s["systemPromptSlots"] = body["systemPromptSlots"]
             if "activeSystemPromptSlot" in body:
                 s["activeSystemPromptSlot"] = body["activeSystemPromptSlot"] or None
+            if isinstance(body.get("wikiPreview"), dict):
+                wp = body["wikiPreview"]
+                try:
+                    max_images = max(0, min(4, int(wp.get("maxImages", 1))))
+                except Exception:
+                    max_images = 1
+                thumb_size = wp.get("thumbSize") if wp.get("thumbSize") in ("s", "m", "l") else "m"
+                s["wikiPreview"] = {"maxImages": max_images, "thumbSize": thumb_size}
             save_settings(s)
             return JSONResponse({"ok": True})
 

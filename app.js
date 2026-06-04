@@ -131,6 +131,10 @@ const state = {
     preset: 'ollama', host: 'localhost', port: 11434,
     path: '/v1', apiKey: '', model: '', timeout: 30,
   },
+  wikiPreview: {
+    maxImages: 1,
+    thumbSize: 'm',
+  },
   skills: [],
   llmHistory: [],
   systemPromptSlots: [],
@@ -183,6 +187,9 @@ async function loadServerSettings() {
     if (data.llm && typeof data.llm === 'object') {
       Object.assign(state.llmConfig, data.llm);
     }
+    if (data.wikiPreview && typeof data.wikiPreview === 'object') {
+      Object.assign(state.wikiPreview, normalizeWikiPreviewSettings(data.wikiPreview));
+    }
     if (Array.isArray(data.systemPromptSlots)) {
       state.systemPromptSlots = data.systemPromptSlots;
     }
@@ -204,6 +211,13 @@ async function loadServerSettings() {
 
 function saveSectionCollapsed() {
   localStorage.setItem('sectionCollapsed', JSON.stringify(state.sectionCollapsed));
+}
+
+function normalizeWikiPreviewSettings(settings = {}) {
+  const parsedMaxImages = parseInt(settings.maxImages, 10);
+  const maxImages = Math.max(0, Math.min(4, Number.isFinite(parsedMaxImages) ? parsedMaxImages : 1));
+  const thumbSize = ['s', 'm', 'l'].includes(settings.thumbSize) ? settings.thumbSize : 'm';
+  return { maxImages, thumbSize };
 }
 
 // Creates a collapsible section header for sidebar sections (fav / tree / history).
@@ -400,6 +414,8 @@ const els = {
   csvJaPath:            $('csv-ja-path'),
   settingsCsvFields:    $('settings-csv-fields'),
   settingsCsvA1111Note: $('settings-csv-a1111-note'),
+  wikiPreviewMaxImages: $('wiki-preview-max-images'),
+  wikiPreviewThumbSize: $('wiki-preview-thumb-size'),
   sysPromptSlotsList:   $('sys-prompt-slots-list'),
   sysPromptContentArea: $('sys-prompt-content-area'),
   sysPromptDelBtn:      $('sys-prompt-slot-del'),
@@ -2614,6 +2630,9 @@ function initSettingsModal() {
     if (els.llmApiKey)       els.llmApiKey.value       = c.apiKey   || '';
     if (els.llmTimeout)      els.llmTimeout.value      = c.timeout  || 120;
     if (els.llmModelSelect)  populateModelSelect([...(c.model ? [c.model] : [])], c.model || '');
+    const wikiPreview = normalizeWikiPreviewSettings(state.wikiPreview);
+    if (els.wikiPreviewMaxImages) els.wikiPreviewMaxImages.value = wikiPreview.maxImages;
+    if (els.wikiPreviewThumbSize) els.wikiPreviewThumbSize.value = wikiPreview.thumbSize;
     updateUnloadVisibility();
     // CSV フィールド
     const isA1111 = _mode === 'a1111';
@@ -2749,6 +2768,11 @@ function initSettingsModal() {
       timeout: parseInt(els.llmTimeout?.value) || 120,
     };
     const body = { llm };
+    const wikiPreview = normalizeWikiPreviewSettings({
+      maxImages: els.wikiPreviewMaxImages?.value,
+      thumbSize: els.wikiPreviewThumbSize?.value,
+    });
+    body.wikiPreview = wikiPreview;
     if (_mode !== 'a1111') {
       body.tagCsv = els.csvTagPath?.value.trim() || '';
       body.jaCsv  = els.csvJaPath?.value.trim()  || '';
@@ -2763,8 +2787,10 @@ function initSettingsModal() {
       }).then(r => r.json());
       if (!data.ok) throw new Error('save failed');
       Object.assign(state.llmConfig, llm);
+      Object.assign(state.wikiPreview, wikiPreview);
       state.systemPromptSlots      = _slots.map(s => ({ ...s }));
       state.activeSystemPromptSlot = _activeSlotId || null;
+      _wikiInfoCache.clear();
       closeSettings();
       showToast('⚙ 設定を保存しました');
     } catch (e) {
@@ -4178,12 +4204,31 @@ async function fetchTagWikiInfo(tagName) {
       otherNames: Array.isArray(data.other_names) ? data.other_names : [],
       body: dTextToPlain(data.body || ''),
       rawBody: data.body || '',
+      thumbnailUrls: await fetchTagPreviewThumbnails(tagName),
     };
     _wikiInfoCache.set(tagName, info);
     return info;
   } catch {
     _wikiInfoCache.set(tagName, null);
     return null;
+  }
+}
+
+async function fetchTagPreviewThumbnails(tagName) {
+  const { maxImages } = normalizeWikiPreviewSettings(state.wikiPreview);
+  if (maxImages <= 0) return [];
+  try {
+    const params = new URLSearchParams({
+      tag: tagName,
+      count: String(maxImages),
+    });
+    const res = await fetch(`api/danbooru-thumbnail?${params}`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) throw new Error('http ' + res.status);
+    const data = await res.json();
+    if (Array.isArray(data.thumbnailUrls)) return data.thumbnailUrls.slice(0, maxImages);
+    return data.thumbnailUrl ? [data.thumbnailUrl] : [];
+  } catch {
+    return [];
   }
 }
 
@@ -4212,6 +4257,7 @@ function openWikiLink(tag) {
 }
 
 function showWikiPreview(e, tag, meta, opts = {}) {
+  wikiPreviewEl._activeTag = tag.name;
   wikiPreviewEl._anchorLeft = opts.anchorLeft || false;
   wikiPreviewEl._fixedPos   = opts.fixedPos   || null;
   const catColors = {
@@ -4253,13 +4299,38 @@ function showWikiPreview(e, tag, meta, opts = {}) {
   wikiPreviewEl.style.display = 'block';
 
   fetchTagWikiInfo(tag.name).then(info => {
-    if (wikiPreviewEl.style.display !== 'block') return;
+    if (wikiPreviewEl.style.display !== 'block' || wikiPreviewEl._activeTag !== tag.name) return;
     const loading = wikiPreviewEl.querySelector('.wiki-preview-loading');
     if (loading) loading.remove();
     if (!info) return;
 
     // Insert content BEFORE the mobile hint so it stays at the bottom
     const hint = wikiPreviewEl.querySelector('.wiki-preview-mobile-hint');
+
+    const thumbnailUrls = Array.isArray(info.thumbnailUrls)
+      ? info.thumbnailUrls
+      : (info.thumbnailUrl ? [info.thumbnailUrl] : []);
+    if (thumbnailUrls.length > 0) {
+      const { thumbSize } = normalizeWikiPreviewSettings(state.wikiPreview);
+      const thumbWrap = document.createElement('div');
+      thumbWrap.className = `wiki-preview-thumb-wrap wiki-preview-thumb-size-${thumbSize}`;
+      if (thumbnailUrls.length > 1) thumbWrap.classList.add('wiki-preview-thumb-grid');
+
+      for (const url of thumbnailUrls) {
+        const img = document.createElement('img');
+        img.className = 'wiki-preview-thumb';
+        img.src = url;
+        img.alt = tag.name;
+        img.loading = 'lazy';
+        img.referrerPolicy = 'no-referrer';
+        img.addEventListener('error', () => {
+          img.remove();
+          if (!thumbWrap.querySelector('.wiki-preview-thumb')) thumbWrap.remove();
+        });
+        thumbWrap.appendChild(img);
+      }
+      hint ? wikiPreviewEl.insertBefore(thumbWrap, hint) : wikiPreviewEl.appendChild(thumbWrap);
+    }
 
     if (info.otherNames.length > 0) {
       const el = document.createElement('div');

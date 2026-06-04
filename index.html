@@ -149,6 +149,24 @@
           </div>
         </section>
 
+        <!-- Wikiプレビュー設定 -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Wikiプレビュー</h3>
+          <div class="settings-field">
+            <label class="settings-label" for="wiki-preview-max-images">最大画像表示数</label>
+            <input id="wiki-preview-max-images" class="settings-input settings-port" type="number" min="0" max="4" step="1" placeholder="1">
+            <div class="settings-note">0で画像なし、1-4でプレビュー内にサムネイルを表示します。</div>
+          </div>
+          <div class="settings-field">
+            <label class="settings-label" for="wiki-preview-thumb-size">サムネイルサイズ</label>
+            <select id="wiki-preview-thumb-size" class="settings-select">
+              <option value="s">S - 96px</option>
+              <option value="m">M - 140px</option>
+              <option value="l">L - 200px</option>
+            </select>
+          </div>
+        </section>
+
         <!-- システムプロンプト設定 -->
         <section class="settings-section">
           <h3 class="settings-section-title">システムプロンプト</h3>

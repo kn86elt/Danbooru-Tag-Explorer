@@ -1559,6 +1559,32 @@ body {
   font-size: 11px;
   color: var(--text-dim);
 }
+.wiki-preview-thumb-wrap {
+  margin: 0 0 8px;
+}
+.wiki-preview-thumb-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.wiki-preview-thumb {
+  display: block;
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+  border-radius: calc(var(--radius) - 2px);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.wiki-preview-thumb-size-s .wiki-preview-thumb { height: 96px; }
+.wiki-preview-thumb-size-m .wiki-preview-thumb { height: 140px; }
+.wiki-preview-thumb-size-l .wiki-preview-thumb { height: 200px; }
+.wiki-preview-thumb-grid .wiki-preview-thumb {
+  height: 84px;
+}
+.wiki-preview-thumb-grid.wiki-preview-thumb-size-s .wiki-preview-thumb { height: 72px; }
+.wiki-preview-thumb-grid.wiki-preview-thumb-size-m .wiki-preview-thumb { height: 84px; }
+.wiki-preview-thumb-grid.wiki-preview-thumb-size-l .wiki-preview-thumb { height: 110px; }
 /* Other names / pixiv aliases */
 .wiki-preview-aliases {
   font-size: 12px;
