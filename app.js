@@ -134,6 +134,9 @@ const state = {
   wikiPreview: {
     maxImages: 1,
     thumbSize: 'm',
+    backgroundImage: false,
+    backgroundFitHeight: false,
+    backgroundShowThumbnails: false,
   },
   skills: [],
   llmHistory: [],
@@ -217,7 +220,13 @@ function normalizeWikiPreviewSettings(settings = {}) {
   const parsedMaxImages = parseInt(settings.maxImages, 10);
   const maxImages = Math.max(0, Math.min(4, Number.isFinite(parsedMaxImages) ? parsedMaxImages : 1));
   const thumbSize = ['s', 'm', 'l'].includes(settings.thumbSize) ? settings.thumbSize : 'm';
-  return { maxImages, thumbSize };
+  return {
+    maxImages,
+    thumbSize,
+    backgroundImage: settings.backgroundImage === true,
+    backgroundFitHeight: settings.backgroundFitHeight === true,
+    backgroundShowThumbnails: settings.backgroundShowThumbnails === true,
+  };
 }
 
 // Creates a collapsible section header for sidebar sections (fav / tree / history).
@@ -416,6 +425,9 @@ const els = {
   settingsCsvA1111Note: $('settings-csv-a1111-note'),
   wikiPreviewMaxImages: $('wiki-preview-max-images'),
   wikiPreviewThumbSize: $('wiki-preview-thumb-size'),
+  wikiPreviewBackground: $('wiki-preview-background'),
+  wikiPreviewBgFitHeight: $('wiki-preview-bg-fit-height'),
+  wikiPreviewBgShowThumbs: $('wiki-preview-bg-show-thumbs'),
   sysPromptSlotsList:   $('sys-prompt-slots-list'),
   sysPromptContentArea: $('sys-prompt-content-area'),
   sysPromptDelBtn:      $('sys-prompt-slot-del'),
@@ -2633,6 +2645,9 @@ function initSettingsModal() {
     const wikiPreview = normalizeWikiPreviewSettings(state.wikiPreview);
     if (els.wikiPreviewMaxImages) els.wikiPreviewMaxImages.value = wikiPreview.maxImages;
     if (els.wikiPreviewThumbSize) els.wikiPreviewThumbSize.value = wikiPreview.thumbSize;
+    if (els.wikiPreviewBackground) els.wikiPreviewBackground.checked = wikiPreview.backgroundImage;
+    if (els.wikiPreviewBgFitHeight) els.wikiPreviewBgFitHeight.checked = wikiPreview.backgroundFitHeight;
+    if (els.wikiPreviewBgShowThumbs) els.wikiPreviewBgShowThumbs.checked = wikiPreview.backgroundShowThumbnails;
     updateUnloadVisibility();
     // CSV フィールド
     const isA1111 = _mode === 'a1111';
@@ -2771,6 +2786,9 @@ function initSettingsModal() {
     const wikiPreview = normalizeWikiPreviewSettings({
       maxImages: els.wikiPreviewMaxImages?.value,
       thumbSize: els.wikiPreviewThumbSize?.value,
+      backgroundImage: els.wikiPreviewBackground?.checked === true,
+      backgroundFitHeight: els.wikiPreviewBgFitHeight?.checked === true,
+      backgroundShowThumbnails: els.wikiPreviewBgShowThumbs?.checked === true,
     });
     body.wikiPreview = wikiPreview;
     if (_mode !== 'a1111') {
@@ -4269,6 +4287,9 @@ function showWikiPreview(e, tag, meta, opts = {}) {
 
   // Build initial content with DOM nodes (so mobile hint stays last)
   wikiPreviewEl.innerHTML = '';
+  wikiPreviewEl.classList.remove('wiki-preview-bg', 'wiki-preview-bg-fit');
+  wikiPreviewEl.style.removeProperty('--wiki-preview-bg-image');
+  wikiPreviewEl.style.removeProperty('--wiki-preview-bg-height');
 
   const nameEl = document.createElement('div');
   nameEl.className = 'wiki-preview-name';
@@ -4310,8 +4331,19 @@ function showWikiPreview(e, tag, meta, opts = {}) {
     const thumbnailUrls = Array.isArray(info.thumbnailUrls)
       ? info.thumbnailUrls
       : (info.thumbnailUrl ? [info.thumbnailUrl] : []);
-    if (thumbnailUrls.length > 0) {
-      const { thumbSize } = normalizeWikiPreviewSettings(state.wikiPreview);
+    const wikiPreviewSettings = normalizeWikiPreviewSettings(state.wikiPreview);
+    const showBackground = wikiPreviewSettings.backgroundImage && thumbnailUrls.length > 0;
+    if (showBackground) {
+      wikiPreviewEl.classList.toggle('wiki-preview-bg-fit', wikiPreviewSettings.backgroundFitHeight);
+      wikiPreviewEl.style.setProperty('--wiki-preview-bg-image', `url("${thumbnailUrls[0].replace(/"/g, '\\"')}")`);
+      wikiPreviewEl.classList.add('wiki-preview-bg');
+      if (wikiPreviewSettings.backgroundFitHeight) {
+        fitWikiPreviewToBackground(thumbnailUrls[0], tag.name);
+      }
+    }
+
+    if (thumbnailUrls.length > 0 && (!showBackground || wikiPreviewSettings.backgroundShowThumbnails)) {
+      const { thumbSize } = wikiPreviewSettings;
       const thumbWrap = document.createElement('div');
       thumbWrap.className = `wiki-preview-thumb-wrap wiki-preview-thumb-size-${thumbSize}`;
       if (thumbnailUrls.length > 1) thumbWrap.classList.add('wiki-preview-thumb-grid');
@@ -4351,6 +4383,20 @@ function showWikiPreview(e, tag, meta, opts = {}) {
       hint ? wikiPreviewEl.insertBefore(el, hint) : wikiPreviewEl.appendChild(el);
     }
   });
+}
+
+function fitWikiPreviewToBackground(url, activeTag) {
+  const img = new Image();
+  img.onload = () => {
+    if (wikiPreviewEl.style.display !== 'block' || wikiPreviewEl._activeTag !== activeTag) return;
+    if (!img.naturalWidth || !img.naturalHeight) return;
+    const width = Math.max(220, wikiPreviewEl.clientWidth || 320);
+    const verticalPadding = 24;
+    const scaledHeight = Math.round((img.naturalHeight / img.naturalWidth) * width) + verticalPadding;
+    const maxHeight = Math.max(220, window.innerHeight - 96);
+    wikiPreviewEl.style.setProperty('--wiki-preview-bg-height', Math.min(scaledHeight, maxHeight) + 'px');
+  };
+  img.src = url;
 }
 
 function repositionWikiPreview(e) {

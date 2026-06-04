@@ -26,6 +26,7 @@ import json
 import random
 import re
 import traceback
+import html
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -79,9 +80,131 @@ def _post_thumbnail_url(post: dict) -> str:
                 break
     return post.get("preview_file_url") or variant_url or post.get("large_file_url") or post.get("file_url") or ""
 
+def _absolute_danbooru_url(url: str) -> str:
+    url = html.unescape(url or "").strip()
+    if url.startswith("//"):
+        return "https:" + url
+    if url.startswith("/"):
+        return "https://danbooru.donmai.us" + url
+    return url
+
+def _first_image_url_from_html(fragment: str) -> str:
+    preview_match = re.search(r"""\bdata-preview-file-url=["']([^"']+)["']""", fragment, re.I)
+    if preview_match:
+        return _absolute_danbooru_url(preview_match.group(1))
+    srcset_match = re.search(r"""\bsrcset=["']([^"']+)["']""", fragment, re.I)
+    if srcset_match:
+        first_src = srcset_match.group(1).split(",")[0].strip().split(" ")[0]
+        if first_src:
+            return _absolute_danbooru_url(first_src)
+    src_match = re.search(r"""\b(?:data-src|src)=["']([^"']+)["']""", fragment, re.I)
+    if src_match:
+        return _absolute_danbooru_url(src_match.group(1))
+    return ""
+
+def _extract_wiki_example_urls(html_text: str, count: int) -> list[str]:
+    urls = []
+    seen = set()
+
+    def add(url: str):
+        url = _absolute_danbooru_url(url)
+        if url and _is_allowed_danbooru_image_url(url) and url not in seen:
+            seen.add(url)
+            urls.append(url)
+
+    for block in re.findall(r"""(?is)<article\b[^>]*class=["'][^"']*post-preview[^"']*["'][^>]*>.*?</article>""", html_text):
+        add(_first_image_url_from_html(block))
+        if len(urls) >= count:
+            return urls
+
+    for block in re.findall(r"""(?is)<media-embed\b[^>]*>.*?</media-embed>""", html_text):
+        add(_first_image_url_from_html(block))
+        if len(urls) >= count:
+            return urls
+
+    for block in re.findall(r"""(?is)<a\b[^>]*href=["']/posts/\d+[^"']*["'][^>]*>.*?</a>""", html_text):
+        add(_first_image_url_from_html(block))
+        if len(urls) >= count:
+            return urls
+
+    return urls
+
+def _extract_wiki_example_post_ids(body: str, count: int) -> list[str]:
+    text = body or ""
+    section_match = re.search(
+        r"(?ims)^h[1-6]\.\s*examples?\s*$([\s\S]*?)(?=^h[1-6]\.\s|\Z)",
+        text,
+    )
+    section = section_match.group(1) if section_match else text
+    ids = []
+    seen = set()
+    pattern = r"(?i)(?:\bpost\s*#?(\d+)\b|(?:^|[(/])posts?/(\d+)\b)"
+    for match in re.finditer(pattern, section):
+        post_id = match.group(1) or match.group(2)
+        if post_id and post_id not in seen:
+            seen.add(post_id)
+            ids.append(post_id)
+            if len(ids) >= count:
+                return ids
+    return ids
+
+def _danbooru_post_thumbnail_url(post_id: str) -> str:
+    req = urllib.request.Request(
+        f"https://danbooru.donmai.us/posts/{urllib.parse.quote(str(post_id), safe='')}.json",
+        headers={"Accept": "application/json", "User-Agent": "DanbooruTagExplorer/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        post = json.loads(resp.read().decode("utf-8"))
+    return _post_thumbnail_url(post) if isinstance(post, dict) else ""
+
+def _danbooru_wiki_body_example_urls(tag_name: str, count: int) -> list[str]:
+    title = urllib.parse.quote(tag_name.replace(" ", "_"), safe="")
+    req = urllib.request.Request(
+        f"https://danbooru.donmai.us/wiki_pages/{title}.json",
+        headers={"Accept": "application/json", "User-Agent": "DanbooruTagExplorer/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        wiki_page = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(wiki_page, dict):
+        return []
+
+    urls = []
+    seen = set()
+    for post_id in _extract_wiki_example_post_ids(wiki_page.get("body") or "", count):
+        try:
+            url = _danbooru_post_thumbnail_url(post_id)
+        except Exception:
+            continue
+        if url and url not in seen:
+            seen.add(url)
+            urls.append(url)
+            if len(urls) >= count:
+                return urls
+    return urls
+
+def _danbooru_wiki_example_urls(tag_name: str, count: int) -> list[str]:
+    title = urllib.parse.quote(tag_name.replace(" ", "_"), safe="")
+    req = urllib.request.Request(
+        f"https://danbooru.donmai.us/wiki_pages/{title}",
+        headers={
+            "Accept": "text/html",
+            "User-Agent": "DanbooruTagExplorer/1.0",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        html_text = resp.read().decode("utf-8", errors="replace")
+    return _extract_wiki_example_urls(html_text, count)
+
 def _danbooru_thumbnail_urls(tag_name: str, count: int = 1) -> list[str]:
     limit = max(1, min(4, int(count or 1)))
-    params = urllib.parse.urlencode({"tags": tag_name + " rating:g", "limit": str(limit)})
+    for example_fetcher in (_danbooru_wiki_body_example_urls, _danbooru_wiki_example_urls):
+        try:
+            example_urls = example_fetcher(tag_name, limit)
+        except Exception:
+            example_urls = []
+        if example_urls:
+            return example_urls[:limit]
+    params = urllib.parse.urlencode({"tags": tag_name + " rating:g order:rank", "limit": str(limit)})
     req = urllib.request.Request(
         f"https://danbooru.donmai.us/posts.json?{params}",
         headers={"Accept": "application/json", "User-Agent": "DanbooruTagExplorer/1.0"},
@@ -327,6 +450,9 @@ _DEFAULTS = {
     "wikiPreview": {
         "maxImages": 1,
         "thumbSize": "m",
+        "backgroundImage": False,
+        "backgroundFitHeight": False,
+        "backgroundShowThumbnails": False,
     },
     "_notes": {
         "tagCsv": "Tag metadata CSV (default: data/danbooru.csv) -- A1111モードでは無視される",
@@ -552,7 +678,13 @@ def on_app_started(demo, app):
                 except Exception:
                     max_images = 1
                 thumb_size = wp.get("thumbSize") if wp.get("thumbSize") in ("s", "m", "l") else "m"
-                s["wikiPreview"] = {"maxImages": max_images, "thumbSize": thumb_size}
+                s["wikiPreview"] = {
+                    "maxImages": max_images,
+                    "thumbSize": thumb_size,
+                    "backgroundImage": wp.get("backgroundImage") is True,
+                    "backgroundFitHeight": wp.get("backgroundFitHeight") is True,
+                    "backgroundShowThumbnails": wp.get("backgroundShowThumbnails") is True,
+                }
             save_settings(s)
             return JSONResponse({"ok": True})
 
