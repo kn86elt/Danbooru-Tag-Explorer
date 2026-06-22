@@ -25,12 +25,19 @@ A1111モードでは CSV は専用エンドポイント (/api/csv/danbooru, /api
 import json
 import random
 import re
+import ssl
 import traceback
 import html
 import urllib.parse
 import urllib.request
 import urllib.error
 from pathlib import Path
+
+try:
+    import certifi
+    _ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _ssl_ctx = ssl.create_default_context()
 
 # FastAPI is imported at module level so that Request (and other types) are in
 # the global namespace when FastAPI inspects route handler signatures.
@@ -66,7 +73,7 @@ LLM_PRESETS = [
 
 def _http_get(url, timeout=5):
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 def _post_thumbnail_url(post: dict) -> str:
@@ -153,7 +160,7 @@ def _danbooru_post_thumbnail_url(post_id: str) -> str:
         f"https://danbooru.donmai.us/posts/{urllib.parse.quote(str(post_id), safe='')}.json",
         headers={"Accept": "application/json", "User-Agent": "DanbooruTagExplorer/1.0"},
     )
-    with urllib.request.urlopen(req, timeout=5) as resp:
+    with urllib.request.urlopen(req, timeout=5, context=_ssl_ctx) as resp:
         post = json.loads(resp.read().decode("utf-8"))
     return _post_thumbnail_url(post) if isinstance(post, dict) else ""
 
@@ -163,7 +170,7 @@ def _danbooru_wiki_body_example_urls(tag_name: str, count: int) -> list[str]:
         f"https://danbooru.donmai.us/wiki_pages/{title}.json",
         headers={"Accept": "application/json", "User-Agent": "DanbooruTagExplorer/1.0"},
     )
-    with urllib.request.urlopen(req, timeout=5) as resp:
+    with urllib.request.urlopen(req, timeout=5, context=_ssl_ctx) as resp:
         wiki_page = json.loads(resp.read().decode("utf-8"))
     if not isinstance(wiki_page, dict):
         return []
@@ -191,7 +198,7 @@ def _danbooru_wiki_example_urls(tag_name: str, count: int) -> list[str]:
             "User-Agent": "DanbooruTagExplorer/1.0",
         },
     )
-    with urllib.request.urlopen(req, timeout=5) as resp:
+    with urllib.request.urlopen(req, timeout=5, context=_ssl_ctx) as resp:
         html_text = resp.read().decode("utf-8", errors="replace")
     return _extract_wiki_example_urls(html_text, count)
 
@@ -209,7 +216,7 @@ def _danbooru_thumbnail_urls(tag_name: str, count: int = 1) -> list[str]:
         f"https://danbooru.donmai.us/posts.json?{params}",
         headers={"Accept": "application/json", "User-Agent": "DanbooruTagExplorer/1.0"},
     )
-    with urllib.request.urlopen(req, timeout=5) as resp:
+    with urllib.request.urlopen(req, timeout=5, context=_ssl_ctx) as resp:
         posts = json.loads(resp.read().decode("utf-8"))
     if not isinstance(posts, list):
         return []
@@ -228,7 +235,7 @@ def _fetch_danbooru_image(url: str):
         url,
         headers={"Accept": "image/*", "User-Agent": "DanbooruTagExplorer/1.0"},
     )
-    with urllib.request.urlopen(req, timeout=8) as resp:
+    with urllib.request.urlopen(req, timeout=8, context=_ssl_ctx) as resp:
         content_type = resp.headers.get("Content-Type") or "application/octet-stream"
         data = resp.read(2 * 1024 * 1024)
     return data, content_type
@@ -241,7 +248,7 @@ def _http_post(url, body=None, timeout=10, extra_headers=None):
     req = urllib.request.Request(
         url, data=data, headers=headers, method="POST"
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
